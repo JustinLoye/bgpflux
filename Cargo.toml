@@ -1,0 +1,17 @@
+[package]
+name = "bgpflux"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bgpkit-broker = "0.10.1"
+bgpkit-parser = "0.15.0"
+chrono = "0.4.43"
+crossbeam-channel = "0.5.15"
+itertools = "0.14.0"
+rayon = "1.11.0"
+criterion = "0.5.1"
+
+[[bench]]
+name = "kmerge_parallel"
+harness = false
