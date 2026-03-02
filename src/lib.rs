@@ -1,5 +1,6 @@
 mod config;
 mod elem;
+mod utils;
 
 use std::{collections::HashMap, fmt::Display};
 
@@ -8,6 +9,7 @@ use bgpkit_parser::BgpkitParser;
 use config::BgpStreamConfig;
 use elem::{BgpStreamElem, BgpStreamElemType};
 use itertools::Itertools;
+use utils::timestamp_from_project_url;
 
 pub struct BgpStream {
     pub config: BgpStreamConfig,
@@ -41,6 +43,7 @@ impl BgpStream {
 
     // Call the broker and set up the iterator
     fn build(mut self) -> impl Iterator<Item = BgpStreamElem> {
+        // Collect URLs from broker
         let broker = std::mem::replace(&mut self.broker, BgpkitBroker::new());
         let items: Vec<BrokerItem> = broker.into_iter().collect();
         let mut collector_urls: HashMap<String, Vec<String>> = HashMap::new();
@@ -59,11 +62,18 @@ impl BgpStream {
 
                 urls.into_iter().flat_map(move |url| {
                     let is_rib_file = url.contains("rib") || url.contains("bview");
+                    let rib_timestamp: Option<f64> = if is_rib_file {
+                        Some(timestamp_from_project_url(&url).unwrap() as f64)
+                    } else {
+                        None
+                    };
                     BgpkitParser::new_cached(&url, "../pybgpkitstream/cache/")
                         .unwrap()
                         .into_iter()
-                        .map(move |elem| {
+                        .map(move |mut elem| {
                             let stream_type = if is_rib_file {
+                                elem.timestamp =
+                                    rib_timestamp.expect("expected rib timestamp for rib file");
                                 BgpStreamElemType::RIB
                             } else {
                                 elem.elem_type.into()

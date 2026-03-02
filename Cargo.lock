@@ -142,6 +142,7 @@ dependencies = [
  "crossbeam-channel",
  "itertools 0.14.0",
  "rayon",
+ "regex",
  "serde",
 ]
 
