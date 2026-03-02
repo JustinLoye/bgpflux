@@ -50,7 +50,6 @@ impl BgpStream {
                 .or_insert_with(Vec::new)
                 .push(item.url.clone());
         }
-        println!("{:?}", collector_urls);
 
         collector_urls
             .into_iter()
@@ -139,6 +138,10 @@ mod tests {
                 .or_insert(0);
             seen_elem_types.insert(elem.elem_type);
             count += 1;
+
+            if count < 20 {
+                println!("{}", elem);
+            }
         }
 
         assert_eq!(count, 81783);
@@ -171,6 +174,10 @@ mod tests {
                 .or_insert(0);
             seen_elem_types.insert(elem.elem_type);
             count += 1;
+
+            if count < 20 {
+                println!("{}", elem);
+            }
         }
 
         assert_eq!(count, 1819101);
