@@ -6,7 +6,7 @@ use std::{collections::HashMap, fmt::Display};
 use bgpkit_broker::{BgpkitBroker, BrokerItem};
 use bgpkit_parser::BgpkitParser;
 use config::BgpStreamConfig;
-use elem::BgpStreamElem;
+use elem::{BgpStreamElem, BgpStreamElemType};
 use itertools::Itertools;
 
 pub struct BgpStream {
@@ -20,7 +20,12 @@ impl BgpStream {
             .ts_start(config.ts_start.clone())
             .ts_end(config.ts_end.clone())
             .collector_id(config.collectors.join(","))
-            .data_type("update");
+            .data_type({
+                match config.data_type {
+                    config::DataType::Rib => "rib",
+                    config::DataType::Update => "update",
+                }
+            });
 
         BgpStream {
             config,
@@ -54,12 +59,21 @@ impl BgpStream {
                 let static_collector: &'static str = Box::leak(collector.into_boxed_str());
 
                 urls.into_iter().flat_map(move |url| {
+                    let is_rib_file = url.contains("rib") || url.contains("bview");
                     BgpkitParser::new_cached(&url, "../pybgpkitstream/cache/")
                         .unwrap()
                         .into_iter()
-                        .map(move |elem| BgpStreamElem {
-                            collector_id: static_collector,
-                            elem,
+                        .map(move |elem| {
+                            let stream_type = if is_rib_file {
+                                BgpStreamElemType::RIB
+                            } else {
+                                elem.elem_type.into()
+                            };
+                            BgpStreamElem {
+                                collector_id: static_collector,
+                                elem_type: stream_type,
+                                elem,
+                            }
                         })
                 })
             })
@@ -69,6 +83,8 @@ impl BgpStream {
 
 #[cfg(test)]
 mod tests {
+    use std::{collections::HashSet, hash::Hash};
+
     use super::*;
 
     #[test]
@@ -103,7 +119,7 @@ mod tests {
     }
 
     #[test]
-    fn stream() {
+    fn stream_update() {
         let config = BgpStreamConfig::new(
             "2010-09-01T00:00:00Z",
             "2010-09-01T02:00:00Z",
@@ -114,17 +130,53 @@ mod tests {
 
         let stream = BgpStream::new(config).build();
         let mut count: u32 = 0;
-        let mut collectors_count: HashMap<_, u32> = HashMap::new();
+        let mut collectors_count = HashMap::new();
+        let mut seen_elem_types = HashSet::new();
         for elem in stream {
             collectors_count
                 .entry(elem.collector_id)
                 .and_modify(|val| *val += 1)
                 .or_insert(0);
+            seen_elem_types.insert(elem.elem_type);
             count += 1;
         }
-        println!("count is {}", count);
+
         assert_eq!(count, 81783);
-        println!("collectors count {:?}", collectors_count)
+        assert_eq!(collectors_count["route-views.sydney"], 50551);
+        assert_eq!(collectors_count["route-views.wide"], 31230);
+        assert_eq!(
+            seen_elem_types,
+            HashSet::from([BgpStreamElemType::ANNOUNCE, BgpStreamElemType::WITHDRAW])
+        );
+    }
+
+    #[test]
+    fn stream_rib() {
+        let config = BgpStreamConfig::new(
+            "2010-09-01T00:00:00Z",
+            "2010-09-01T1:55:00Z",
+            vec!["route-views.wide", "route-views.sydney"],
+            config::DataType::Rib,
+        )
+        .unwrap();
+
+        let stream = BgpStream::new(config).build();
+        let mut count: u32 = 0;
+        let mut collectors_count = HashMap::new();
+        let mut seen_elem_types = HashSet::new();
+        for elem in stream {
+            collectors_count
+                .entry(elem.collector_id)
+                .and_modify(|val| *val += 1)
+                .or_insert(0);
+            seen_elem_types.insert(elem.elem_type);
+            count += 1;
+        }
+
+        assert_eq!(count, 1819101);
+        assert_eq!(collectors_count["route-views.sydney"], 828936);
+        assert_eq!(collectors_count["route-views.wide"], 990163);
+        assert_eq!(seen_elem_types, HashSet::from([BgpStreamElemType::RIB]));
     }
 
     #[test]
