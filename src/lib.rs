@@ -1,11 +1,12 @@
 mod config;
+mod elem;
 
 use std::{collections::HashMap, fmt::Display};
 
 use bgpkit_broker::{BgpkitBroker, BrokerItem};
-use bgpkit_parser::{BgpElem, BgpkitParser};
-use chrono::format::Item;
+use bgpkit_parser::BgpkitParser;
 use config::BgpStreamConfig;
+use elem::BgpStreamElem;
 use itertools::Itertools;
 
 pub struct BgpStream {
@@ -34,7 +35,7 @@ impl BgpStream {
     }
 
     // Call the broker and set up the iterator
-    fn build(mut self) -> impl Iterator<Item = BgpElem> {
+    fn build(mut self) -> impl Iterator<Item = BgpStreamElem> {
         let broker = std::mem::replace(&mut self.broker, BgpkitBroker::new());
         let items: Vec<BrokerItem> = broker.into_iter().collect();
         let mut collector_urls: HashMap<String, Vec<String>> = HashMap::new();
@@ -47,10 +48,19 @@ impl BgpStream {
         println!("{:?}", collector_urls);
 
         collector_urls
-            .into_values()
-            .map(|urls| {
-                urls.into_iter().flat_map(|url| {
-                    BgpkitParser::new_cached(&url, "../pybgpkitstream/cache/").unwrap()
+            .into_iter()
+            .map(|(collector, urls)| {
+                // This happens ONLY ONCE per collector, not per element.
+                let static_collector: &'static str = Box::leak(collector.into_boxed_str());
+
+                urls.into_iter().flat_map(move |url| {
+                    BgpkitParser::new_cached(&url, "../pybgpkitstream/cache/")
+                        .unwrap()
+                        .into_iter()
+                        .map(move |elem| BgpStreamElem {
+                            collector_id: static_collector,
+                            elem,
+                        })
                 })
             })
             .kmerge_by(|a, b| a.timestamp <= b.timestamp)
@@ -102,13 +112,19 @@ mod tests {
         )
         .unwrap();
 
-        // let stream = BgpStream::new(config).build();
-        let count = BgpStream::new(config).build().count();
-        // for elem in stream {
-        //     println!("{}", elem)
-        // }
+        let stream = BgpStream::new(config).build();
+        let mut count: u32 = 0;
+        let mut collectors_count: HashMap<_, u32> = HashMap::new();
+        for elem in stream {
+            collectors_count
+                .entry(elem.collector_id)
+                .and_modify(|val| *val += 1)
+                .or_insert(0);
+            count += 1;
+        }
         println!("count is {}", count);
-        assert_eq!(count, 81783)
+        assert_eq!(count, 81783);
+        println!("collectors count {:?}", collectors_count)
     }
 
     #[test]
