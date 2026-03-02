@@ -4,21 +4,13 @@ use std::{collections::HashMap, fmt::Display};
 
 use bgpkit_broker::{BgpkitBroker, BrokerItem};
 use bgpkit_parser::{BgpElem, BgpkitParser};
+use chrono::format::Item;
 use config::BgpStreamConfig;
 use itertools::Itertools;
 
 pub struct BgpStream {
     pub config: BgpStreamConfig,
     pub broker: BgpkitBroker,
-
-    // Created after build call
-    // collector_urls: HashMap<String, Vec<String>>,
-    iterator: Option<Box<dyn Iterator<Item = BgpElem>>>,
-}
-
-struct DataTypeBrokers {
-    update: Option<BgpkitBroker>, // collector_id -> urls
-    rib: Option<BgpkitBroker>,    // collector_id -> urls
 }
 
 impl BgpStream {
@@ -32,7 +24,7 @@ impl BgpStream {
         BgpStream {
             config,
             broker,
-            iterator: None,
+            // iterator: None,
         }
     }
 
@@ -42,7 +34,7 @@ impl BgpStream {
     }
 
     // Call the broker and set up the iterator
-    fn build(mut self) -> Self {
+    fn build(mut self) -> impl Iterator<Item = BgpElem> {
         let broker = std::mem::replace(&mut self.broker, BgpkitBroker::new());
         let items: Vec<BrokerItem> = broker.into_iter().collect();
         let mut collector_urls: HashMap<String, Vec<String>> = HashMap::new();
@@ -54,24 +46,14 @@ impl BgpStream {
         }
         println!("{:?}", collector_urls);
 
-        self.iterator = Some(Box::new(
-            collector_urls
-                .into_values()
-                .map(|urls| {
-                    urls.into_iter().flat_map(|url| {
-                        BgpkitParser::new_cached(&url, "../pybgpkitstream/cache/").unwrap()
-                    })
+        collector_urls
+            .into_values()
+            .map(|urls| {
+                urls.into_iter().flat_map(|url| {
+                    BgpkitParser::new_cached(&url, "../pybgpkitstream/cache/").unwrap()
                 })
-                .kmerge(),
-        ));
-        self
-    }
-}
-
-impl Iterator for BgpStream {
-    type Item = BgpElem;
-    fn next(&mut self) -> Option<Self::Item> {
-        self.iterator.as_mut()?.next()
+            })
+            .kmerge_by(|a, b| a.timestamp <= b.timestamp)
     }
 }
 
@@ -127,5 +109,26 @@ mod tests {
         // }
         println!("count is {}", count);
         assert_eq!(count, 81783)
+    }
+
+    #[test]
+    fn bench_throughput() {
+        let config = BgpStreamConfig::new(
+            "2015-09-01T00:00:00Z",
+            "2015-09-01T05:00:00Z",
+            vec!["route-views.wide", "route-views.sydney"],
+            config::DataType::Update,
+        )
+        .unwrap();
+
+        let start = std::time::Instant::now();
+        let count = BgpStream::new(config).build().count();
+        let elapsed = start.elapsed();
+
+        let throughput = count as f64 / elapsed.as_secs_f64();
+        println!(
+            "{} elements in {:.2?} ({:.0} elem/sec)",
+            count, elapsed, throughput
+        );
     }
 }
