@@ -1,40 +1,69 @@
-use bgpkit_parser::{BgpElem, BgpkitParser};
+pub mod config;
+pub mod elem;
+pub mod utils;
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct BgpStreamElem {
-    pub collector_id: String,
-    pub elem: BgpElem,
+use bgpflux::{BgpStream, BgpStreamConfig, DataType};
+use clap::{Parser, ValueEnum}; // Replace with your actual crate name
+
+#[derive(Parser, Debug)]
+#[command(author, version, about = "A CLI to stream BGP elements from collectors", long_about = None)]
+struct Args {
+    /// Start timestamp (e.g., "2022-01-01T00:00:00Z" or Unix timestamp)
+    #[arg(short, long)]
+    start: String,
+
+    /// End timestamp (e.g., "2022-01-01T01:00:00Z")
+    #[arg(short, long)]
+    end: String,
+
+    /// Data type: 'update' or 'rib'
+    #[arg(short, long, value_enum, default_value_t = DataTypeArg::Update)]
+    data_type: DataTypeArg,
+
+    /// Collectors to filter by (can be used multiple times)
+    #[arg(short, long, value_delimiter = ',')]
+    collectors: Vec<String>,
+
+    /// Custom broker URL
+    #[arg(short, long, default_value = "https://api.bgpkit.com/v3/broker")]
+    broker_url: String,
 }
 
-impl std::ops::Deref for BgpStreamElem {
-    type Target = BgpElem;
-    fn deref(&self) -> &Self::Target {
-        &self.elem
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
+enum DataTypeArg {
+    Update,
+    Rib,
+}
+
+impl From<DataTypeArg> for DataType {
+    fn from(arg: DataTypeArg) -> Self {
+        match arg {
+            DataTypeArg::Update => DataType::Update,
+            DataTypeArg::Rib => DataType::Rib,
+        }
     }
 }
 
-fn main() {
-    // let collectors = "route-views.wide,route-views.sydney,jojolasticot";
-    // let ts_start = "2010-09-01T00:00:00Z";
-    // let ts_end = "2010-09-01T02:00:00Z";
-    // let data_type = "rib";
+use std::io::{self, BufWriter, Write};
 
-    // let broker = BgpkitBroker::new()
-    //     .collector_id(collectors)
-    //     .ts_start(ts_start)
-    //     .ts_end(ts_end)
-    //     .data_type(data_type);
-    let parser = BgpkitParser::new_cached(
-        "https://routeviews.org/route-views.wide/bgpdata/2010.09/UPDATES/updates.20100901.0000.bz2",
-        "../pybgpkitstream/cache",
-    )
-    .unwrap();
-    let mut count = 0;
-    for elem in parser {
-        println!("{}", elem);
-        count += 1;
-        if count > 5 {
-            break;
-        }
+fn main() {
+    let args = Args::parse();
+
+    let config =
+        match BgpStreamConfig::new(args.start, args.end, args.collectors, args.data_type.into()) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("Error configuring stream: {}", e);
+                std::process::exit(1);
+            }
+        };
+
+    let stream = BgpStream::new(config).broker_url(args.broker_url).build();
+
+    let stdout = io::stdout();
+    let mut out = BufWriter::with_capacity(1 << 20, stdout.lock());
+
+    for elem in stream {
+        writeln!(out, "{}", elem).unwrap();
     }
 }

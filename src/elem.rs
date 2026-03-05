@@ -1,4 +1,5 @@
-use bgpkit_parser::{BgpElem, models::ElemType, models::elem::option_to_string_communities};
+use bgpkit_parser::models::MetaCommunity;
+use bgpkit_parser::{BgpElem, models::ElemType};
 use std::fmt::{Display, Formatter};
 
 // This struct is adapted from bgpkit-parser
@@ -37,60 +38,92 @@ impl std::ops::Deref for BgpStreamElem {
     }
 }
 
-// This struct is copied from bgpkit-parser
-// Original source: https://github.com/bgpkit/bgpkit-parser/
-// Copyright (c) 2021 Mingwei Zhang
-// Licensed under the MIT License
-/// `OptionToStr` is a helper struct that wraps an `Option` and provides a convenient
-/// way to convert its value to a string representation.
-///
-/// # Generic Parameters
-///
-/// - `'a`: The lifetime parameter that represents the lifetime of the wrapped `Option` value.
-///
-/// # Fields
-///
-/// - `0: &'a Option<T>`: The reference to the wrapped `Option` value.
-struct OptionToStr<'a, T>(&'a Option<T>);
+struct CommunitiesDisplay<'a>(&'a Option<Vec<MetaCommunity>>);
 
-impl<T: Display> Display for OptionToStr<'_, T> {
+impl Display for CommunitiesDisplay<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self.0 {
-            None => Ok(()),
-            Some(x) => write!(f, "{x}"),
+        if let Some(v) = self.0 {
+            for (i, comm) in v.iter().enumerate() {
+                if i > 0 {
+                    f.write_str(" ")?;
+                }
+                write!(f, "{}", comm)?;
+            }
         }
+        Ok(())
     }
 }
 
-// This trait is adapted from bgpkit-parser
-// Original source: https://github.com/bgpkit/bgpkit-parser/
-// Copyright (c) 2021 Mingwei Zhang
-// Licensed under the MIT License
 impl Display for BgpStreamElem {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        // 1. Map the type to a static string
         let t = match self.elem_type {
             BgpStreamElemType::ANNOUNCE => "A",
             BgpStreamElemType::WITHDRAW => "W",
-            BgpStreamElemType::RIB => "R", // Addition
+            BgpStreamElemType::RIB => "R",
         };
-        write!(
-            f,
-            "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
-            t,
-            &self.timestamp,
-            &self.peer_ip,
-            &self.peer_asn,
-            &self.prefix,
-            OptionToStr(&self.as_path),
-            OptionToStr(&self.origin),
-            OptionToStr(&self.next_hop),
-            OptionToStr(&self.local_pref),
-            OptionToStr(&self.med),
-            option_to_string_communities(&self.communities),
-            self.atomic,
-            OptionToStr(&self.aggr_asn),
-            OptionToStr(&self.aggr_ip),
-            &self.collector_id // Addition
-        )
+
+        // 2. Write fields. We use write_str for literals and pipe separators
+        // to avoid the overhead of the write! macro's parser.
+        f.write_str(t)?;
+        f.write_str("|")?;
+
+        // Use itoa for the timestamp if possible, or just write!
+        write!(f, "{}", self.timestamp)?;
+        f.write_str("|")?;
+
+        write!(f, "{}", self.peer_ip)?;
+        f.write_str("|")?;
+
+        write!(f, "{}", self.peer_asn)?;
+        f.write_str("|")?;
+
+        write!(f, "{}", self.prefix)?;
+        f.write_str("|")?;
+
+        // 3. Handle Options without the wrapper overhead
+        if let Some(ref v) = self.as_path {
+            write!(f, "{}", v)?;
+        }
+        f.write_str("|")?;
+
+        if let Some(ref v) = self.origin {
+            write!(f, "{}", v)?;
+        }
+        f.write_str("|")?;
+
+        if let Some(ref v) = self.next_hop {
+            write!(f, "{}", v)?;
+        }
+        f.write_str("|")?;
+
+        if let Some(ref v) = self.local_pref {
+            write!(f, "{}", v)?;
+        }
+        f.write_str("|")?;
+
+        if let Some(ref v) = self.med {
+            write!(f, "{}", v)?;
+        }
+        f.write_str("|")?;
+
+        // 4. Use the zero-allocation communities display
+        CommunitiesDisplay(&self.communities).fmt(f)?;
+        f.write_str("|")?;
+
+        write!(f, "{}", self.atomic)?;
+        f.write_str("|")?;
+
+        if let Some(ref v) = self.aggr_asn {
+            write!(f, "{}", v)?;
+        }
+        f.write_str("|")?;
+
+        if let Some(ref v) = self.aggr_ip {
+            write!(f, "{}", v)?;
+        }
+        f.write_str("|")?;
+
+        f.write_str(self.collector_id)
     }
 }

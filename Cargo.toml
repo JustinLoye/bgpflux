@@ -10,9 +10,9 @@ chrono = "0.4.43"
 crossbeam-channel = "0.5.15"
 itertools = "0.14.0"
 rayon = "1.11.0"
-criterion = "0.5.1"
 serde = { version = "1.0", features = ["derive"], optional = true }
 regex = "1.12.3"
+clap = { version = "4.5.60", features = ["derive"] }
 
 [[bench]]
 name = "kmerge_parallel"

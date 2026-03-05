@@ -1,13 +1,13 @@
-mod config;
-mod elem;
-mod utils;
+pub mod config;
+pub mod elem;
+pub mod utils;
 
 use std::{collections::HashMap, fmt::Display};
 
 use bgpkit_broker::{BgpkitBroker, BrokerItem};
 use bgpkit_parser::BgpkitParser;
-use config::BgpStreamConfig;
-use elem::{BgpStreamElem, BgpStreamElemType};
+pub use config::{BgpStreamConfig, DataType};
+pub use elem::{BgpStreamElem, BgpStreamElemType};
 use itertools::Itertools;
 use utils::timestamp_from_project_url;
 
@@ -17,7 +17,7 @@ pub struct BgpStream {
 }
 
 impl BgpStream {
-    fn new(config: BgpStreamConfig) -> Self {
+    pub fn new(config: BgpStreamConfig) -> Self {
         let broker = BgpkitBroker::new()
             .ts_start(config.ts_start.clone())
             .ts_end(config.ts_end.clone())
@@ -29,20 +29,16 @@ impl BgpStream {
                 }
             });
 
-        BgpStream {
-            config,
-            broker,
-            // iterator: None,
-        }
+        BgpStream { config, broker }
     }
 
-    fn broker_url<S: Display>(mut self, broker_url: S) -> Self {
+    pub fn broker_url<S: Display>(mut self, broker_url: S) -> Self {
         self.broker = self.broker.broker_url(broker_url);
         self
     }
 
     // Call the broker and set up the iterator
-    fn build(mut self) -> impl Iterator<Item = BgpStreamElem> {
+    pub fn build(mut self) -> impl Iterator<Item = BgpStreamElem> {
         // Collect URLs from broker
         let broker = std::mem::replace(&mut self.broker, BgpkitBroker::new());
         let items: Vec<BrokerItem> = broker.into_iter().collect();
@@ -92,7 +88,7 @@ impl BgpStream {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashSet, hash::Hash};
+    use std::collections::HashSet;
 
     use super::*;
 
@@ -199,15 +195,21 @@ mod tests {
     #[test]
     fn bench_throughput() {
         let config = BgpStreamConfig::new(
-            "2015-09-01T00:00:00Z",
-            "2015-09-01T05:00:00Z",
-            vec!["route-views.wide", "route-views.sydney"],
+            "2026-02-04T15:59:00Z",
+            "2026-02-04T18:59:00Z",
+            vec!["route-views.amsix", "route-views.linx"],
             config::DataType::Update,
         )
         .unwrap();
 
         let start = std::time::Instant::now();
-        let count = BgpStream::new(config).build().count();
+        // let count = BgpStream::new(config).build().count();
+        let mut count = 0;
+        let stream = BgpStream::new(config).build();
+        for elem in stream {
+            std::hint::black_box(&elem);
+            count += 1;
+        }
         let elapsed = start.elapsed();
 
         let throughput = count as f64 / elapsed.as_secs_f64();
@@ -216,4 +218,33 @@ mod tests {
             count, elapsed, throughput
         );
     }
+
+    // #[test]
+    // fn sandbox() {
+    //     let config_update = BgpStreamConfig::new(
+    //         "2015-09-01T00:00:00Z",
+    //         "2015-09-01T02:05:00Z",
+    //         vec!["route-views.wide", "route-views.sydney"],
+    //         config::DataType::Update,
+    //     )
+    //     .unwrap();
+
+    //     let config_rib = BgpStreamConfig::new(
+    //         "2015-09-01T00:00:00Z",
+    //         "2015-09-01T02:05:00Z",
+    //         vec!["route-views.wide", "route-views.sydney"],
+    //         config::DataType::Update,
+    //     )
+    //     .unwrap();
+
+    //     let start = std::time::Instant::now();
+    //     let count = BgpStream::new(config).build().count();
+    //     let elapsed = start.elapsed();
+
+    //     let throughput = count as f64 / elapsed.as_secs_f64();
+    //     println!(
+    //         "{} elements in {:.2?} ({:.0} elem/sec)",
+    //         count, elapsed, throughput
+    //     );
+    // }
 }
