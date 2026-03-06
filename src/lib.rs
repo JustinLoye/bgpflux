@@ -14,6 +14,7 @@ use utils::timestamp_from_project_url;
 pub struct BgpStream {
     pub config: BgpStreamConfig,
     pub broker_url: Option<String>,
+    pub cache_dir: Option<String>,
 }
 
 impl BgpStream {
@@ -21,11 +22,17 @@ impl BgpStream {
         BgpStream {
             config,
             broker_url: None,
+            cache_dir: None,
         }
     }
 
     pub fn broker_url<S: Display>(mut self, broker_url: S) -> Self {
         self.broker_url = Some(broker_url.to_string());
+        self
+    }
+
+    pub fn cache_dir<S: Display>(mut self, cache_dir: S) -> Self {
+        self.cache_dir = Some(cache_dir.to_string());
         self
     }
 
@@ -59,33 +66,40 @@ impl BgpStream {
         }
 
         // Chain archive files for each (collector, data_type) pair
+        let cache_dir = self.cache_dir.clone();
+
         let mut streams = Vec::new();
         for ((collector, is_rib), urls) in grouped_urls.into_iter() {
             let static_collector: &'static str = Box::leak(collector.into_boxed_str());
-            // Broker returns sorted urls per collector so to get an ordered stream we just need to chain archive files with flap_map
+
+            let cache_dir = cache_dir.clone();
+
             let stream = urls.into_iter().flat_map(move |url| {
                 let rib_timestamp: Option<f64> = if is_rib {
                     Some(timestamp_from_project_url(&url).unwrap() as f64)
                 } else {
                     None
                 };
-                BgpkitParser::new_cached(&url, "../pybgpkitstream/cache/")
-                    .unwrap()
-                    .into_iter()
-                    .map(move |mut elem| {
-                        let stream_type = if is_rib {
-                            elem.timestamp =
-                                rib_timestamp.expect("expected rib timestamp for rib file");
-                            BgpStreamElemType::RIB
-                        } else {
-                            elem.elem_type.into()
-                        };
-                        BgpStreamElem {
-                            collector_id: static_collector,
-                            elem_type: stream_type,
-                            elem,
-                        }
-                    })
+
+                let parser = match &cache_dir {
+                    Some(path) => BgpkitParser::new_cached(&url, path),
+                    None => BgpkitParser::new(&url),
+                };
+
+                parser.unwrap().into_iter().map(move |mut elem| {
+                    let stream_type = if is_rib {
+                        elem.timestamp =
+                            rib_timestamp.expect("expected rib timestamp for rib file");
+                        BgpStreamElemType::RIB
+                    } else {
+                        elem.elem_type.into()
+                    };
+                    BgpStreamElem {
+                        collector_id: static_collector,
+                        elem_type: stream_type,
+                        elem,
+                    }
+                })
             });
             streams.push(stream);
         }
@@ -114,6 +128,45 @@ mod tests {
         .unwrap();
 
         let stream = BgpStream::new(config).build();
+        let mut count: u32 = 0;
+        let mut collectors_count = HashMap::new();
+        let mut seen_elem_types = HashSet::new();
+        let mut timestamps = Vec::new();
+        for elem in stream {
+            collectors_count
+                .entry(elem.collector_id)
+                .and_modify(|val| *val += 1)
+                .or_insert(0);
+            seen_elem_types.insert(elem.elem_type);
+            timestamps.push(elem.timestamp);
+            count += 1;
+
+            if count < 20 {
+                println!("{}", elem);
+            }
+        }
+
+        assert_eq!(count, 81783);
+        assert_eq!(collectors_count["route-views.sydney"], 50551);
+        assert_eq!(collectors_count["route-views.wide"], 31230);
+        assert_eq!(
+            seen_elem_types,
+            HashSet::from([BgpStreamElemType::ANNOUNCE, BgpStreamElemType::WITHDRAW])
+        );
+        assert!(timestamps.is_sorted());
+    }
+
+    #[test]
+    fn stream_cache() {
+        let config = BgpStreamConfig::new(
+            "2010-09-01T00:00:00Z",
+            "2010-09-01T02:00:00Z",
+            vec!["route-views.wide", "route-views.sydney"],
+            config::DataType::Update,
+        )
+        .unwrap();
+
+        let stream = BgpStream::new(config).cache_dir("cache").build();
         let mut count: u32 = 0;
         let mut collectors_count = HashMap::new();
         let mut seen_elem_types = HashSet::new();
@@ -236,7 +289,7 @@ mod tests {
             "2026-02-04T15:59:00Z",
             "2026-02-04T18:59:00Z",
             vec!["route-views.amsix", "route-views.linx"],
-            config::DataType::Both,
+            config::DataType::Update,
         )
         .unwrap();
 
@@ -244,6 +297,35 @@ mod tests {
         // let count = BgpStream::new(config).build().count();
         let mut count = 0;
         let stream = BgpStream::new(config).build();
+        for elem in stream {
+            std::hint::black_box(&elem);
+            count += 1;
+        }
+        let elapsed = start.elapsed();
+
+        let throughput = count as f64 / elapsed.as_secs_f64();
+        println!(
+            "{} elements in {:.2?} ({:.0} elem/sec)",
+            count, elapsed, throughput
+        );
+    }
+
+    #[test]
+    #[ignore]
+    // Run it with cargo test bench_cache_throughput --release -- --nocapture --ignored
+    fn bench_cache_throughput() {
+        let config = BgpStreamConfig::new(
+            "2026-02-04T15:59:00Z",
+            "2026-02-04T18:59:00Z",
+            vec!["route-views.amsix", "route-views.linx"],
+            config::DataType::Update,
+        )
+        .unwrap();
+
+        let start = std::time::Instant::now();
+        // let count = BgpStream::new(config).build().count();
+        let mut count = 0;
+        let stream = BgpStream::new(config).cache_dir("cache").build();
         for elem in stream {
             std::hint::black_box(&elem);
             count += 1;
