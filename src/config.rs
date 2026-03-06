@@ -3,10 +3,11 @@ use std::fmt::Display;
 use bgpkit_broker::{BrokerError, load_collectors};
 use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DataType {
     Update,
     Rib,
+    Both,
 }
 
 #[derive(Debug)]
