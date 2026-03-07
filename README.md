@@ -93,3 +93,8 @@ fn main() {
 This project uses code adapted from:
 - [bgpkit-broker](https://github.com/bgpkit/bgpkit-broker) for timestamp parsing
 - [bgpkit-parser](https://github.com/bgpkit/bgpkit-parser) for BGP data parsing
+
+## Roadmap
+
+- [ ] filter support
+- [ ] live mode
