@@ -6,6 +6,7 @@ use std::{collections::HashMap, fmt::Display};
 
 use bgpkit_broker::BgpkitBroker;
 use bgpkit_parser::BgpkitParser;
+use chrono::DateTime;
 pub use config::{BgpStreamConfig, DataType};
 pub use elem::{BgpStreamElem, BgpStreamElemType};
 use itertools::Itertools;
@@ -67,6 +68,12 @@ impl BgpStream {
 
         // Chain archive files for each (collector, data_type) pair
         let cache_dir = self.cache_dir.clone();
+        let start = DateTime::parse_from_rfc3339(&self.config.ts_start)
+            .unwrap()
+            .timestamp() as f64;
+        let end = DateTime::parse_from_rfc3339(&self.config.ts_end)
+            .unwrap()
+            .timestamp() as f64;
 
         let mut streams = Vec::new();
         for ((collector, is_rib), urls) in grouped_urls.into_iter() {
@@ -85,21 +92,25 @@ impl BgpStream {
                     Some(path) => BgpkitParser::new_cached(&url, path),
                     None => BgpkitParser::new(&url),
                 };
-
-                parser.unwrap().into_iter().map(move |mut elem| {
-                    let stream_type = if is_rib {
-                        elem.timestamp =
-                            rib_timestamp.expect("expected rib timestamp for rib file");
-                        BgpStreamElemType::RIB
-                    } else {
-                        elem.elem_type.into()
-                    };
-                    BgpStreamElem {
-                        collector_id: static_collector,
-                        elem_type: stream_type,
-                        elem,
-                    }
-                })
+                parser
+                    .unwrap()
+                    .into_iter()
+                    .take_while(move |elem| elem.timestamp <= end)
+                    .map(move |mut elem| {
+                        let stream_type = if is_rib {
+                            elem.timestamp =
+                                rib_timestamp.expect("expected rib timestamp for rib file");
+                            BgpStreamElemType::RIB
+                        } else {
+                            elem.elem_type.into()
+                        };
+                        BgpStreamElem {
+                            collector_id: static_collector,
+                            elem_type: stream_type,
+                            elem,
+                        }
+                    })
+                    .skip_while(move |elem| elem.timestamp < start - 0.1)
             });
             streams.push(stream);
         }
@@ -121,7 +132,7 @@ mod tests {
     fn stream_update() {
         let config = BgpStreamConfig::new(
             "2010-09-01T00:00:00Z",
-            "2010-09-01T02:00:00Z",
+            "2010-09-01T01:55:00Z",
             vec!["route-views.wide", "route-views.sydney"],
             config::DataType::Update,
         )
@@ -136,7 +147,7 @@ mod tests {
             collectors_count
                 .entry(elem.collector_id)
                 .and_modify(|val| *val += 1)
-                .or_insert(0);
+                .or_insert(1);
             seen_elem_types.insert(elem.elem_type);
             timestamps.push(elem.timestamp);
             count += 1;
@@ -145,10 +156,9 @@ mod tests {
                 println!("{}", elem);
             }
         }
-
-        assert_eq!(count, 81783);
-        assert_eq!(collectors_count["route-views.sydney"], 50551);
-        assert_eq!(collectors_count["route-views.wide"], 31230);
+        assert_eq!(count, 48287 + 29490);
+        assert_eq!(collectors_count["route-views.sydney"], 48287);
+        assert_eq!(collectors_count["route-views.wide"], 29490);
         assert_eq!(
             seen_elem_types,
             HashSet::from([BgpStreamElemType::ANNOUNCE, BgpStreamElemType::WITHDRAW])
@@ -160,7 +170,7 @@ mod tests {
     fn stream_cache() {
         let config = BgpStreamConfig::new(
             "2010-09-01T00:00:00Z",
-            "2010-09-01T02:00:00Z",
+            "2010-09-01T01:55:00Z",
             vec!["route-views.wide", "route-views.sydney"],
             config::DataType::Update,
         )
@@ -175,7 +185,7 @@ mod tests {
             collectors_count
                 .entry(elem.collector_id)
                 .and_modify(|val| *val += 1)
-                .or_insert(0);
+                .or_insert(1);
             seen_elem_types.insert(elem.elem_type);
             timestamps.push(elem.timestamp);
             count += 1;
@@ -185,9 +195,9 @@ mod tests {
             }
         }
 
-        assert_eq!(count, 81783);
-        assert_eq!(collectors_count["route-views.sydney"], 50551);
-        assert_eq!(collectors_count["route-views.wide"], 31230);
+        assert_eq!(count, 48287 + 29490);
+        assert_eq!(collectors_count["route-views.sydney"], 48287);
+        assert_eq!(collectors_count["route-views.wide"], 29490);
         assert_eq!(
             seen_elem_types,
             HashSet::from([BgpStreamElemType::ANNOUNCE, BgpStreamElemType::WITHDRAW])
@@ -214,7 +224,7 @@ mod tests {
             collectors_count
                 .entry(elem.collector_id)
                 .and_modify(|val| *val += 1)
-                .or_insert(0);
+                .or_insert(1);
             seen_elem_types.insert(elem.elem_type);
             timestamps.push(elem.timestamp);
             count += 1;
@@ -223,10 +233,10 @@ mod tests {
                 println!("{}", elem);
             }
         }
-
-        assert_eq!(count, 1819101);
-        assert_eq!(collectors_count["route-views.sydney"], 828936);
-        assert_eq!(collectors_count["route-views.wide"], 990163);
+        println!("{:?}", collectors_count);
+        assert_eq!(count, 828937 + 990164);
+        assert_eq!(collectors_count["route-views.sydney"], 828937);
+        assert_eq!(collectors_count["route-views.wide"], 990164);
         assert_eq!(seen_elem_types, HashSet::from([BgpStreamElemType::RIB]));
         assert!(timestamps.is_sorted());
     }
@@ -255,7 +265,7 @@ mod tests {
                     }
                 }))
                 .and_modify(|val| *val += 1)
-                .or_insert(0);
+                .or_insert(1);
             seen_elem_types.insert(elem.elem_type);
             timestamps.push(elem.timestamp);
             count += 1;
@@ -264,12 +274,11 @@ mod tests {
                 println!("{}", elem);
             }
         }
-        // println!({})
-        assert_eq!(count, 1819101 + 81783);
-        assert_eq!(collectors_count[&("route-views.sydney", "rib")], 828936);
-        assert_eq!(collectors_count[&("route-views.wide", "rib")], 990163);
-        assert_eq!(collectors_count[&("route-views.sydney", "update")], 50551);
-        assert_eq!(collectors_count[&("route-views.wide", "update")], 31230);
+        assert_eq!(count, 828937 + 990164 + 48287 + 29490);
+        assert_eq!(collectors_count[&("route-views.sydney", "rib")], 828937);
+        assert_eq!(collectors_count[&("route-views.wide", "rib")], 990164);
+        assert_eq!(collectors_count[&("route-views.sydney", "update")], 48287);
+        assert_eq!(collectors_count[&("route-views.wide", "update")], 29490);
         assert_eq!(
             seen_elem_types,
             HashSet::from([
