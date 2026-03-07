@@ -1,19 +1,21 @@
 [package]
 name = "bgpflux"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+authors = ["Justin Loye"]
+description = "A Rust library and CLI for streaming ordered BGP elements from multiple collectors"
+license = "MIT"
+repository = "https://github.com/JustinLoye/bgpflux"
+homepage = "https://github.com/JustinLoye/bgpflux"
+keywords = ["bgp", "routing", "bgpkit", "bgpstream"]
+categories = ["network-programming"]
+readme = "README.md"
 
 [dependencies]
 bgpkit-broker = "0.10.1"
 bgpkit-parser = "0.15.0"
 chrono = "0.4.43"
-crossbeam-channel = "0.5.15"
 itertools = "0.14.0"
-rayon = "1.11.0"
 serde = { version = "1.0", features = ["derive"], optional = true }
 regex = "1.12.3"
 clap = { version = "4.5.60", features = ["derive"] }
-
-[[bench]]
-name = "kmerge_parallel"
-harness = false

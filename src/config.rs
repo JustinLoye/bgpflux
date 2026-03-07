@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use bgpkit_broker::{BrokerError, load_collectors};
+use bgpkit_broker::{load_collectors, BrokerError};
 use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -10,14 +10,48 @@ pub enum DataType {
     Both,
 }
 
+/// Configuration for a BGP stream.
+///
+/// This struct holds the parameters that define which BGP data to stream:
+/// time range, collectors, and data types.
 #[derive(Debug)]
 pub struct BgpStreamConfig {
+    /// Start timestamp (RFC3339 format or Unix timestamp)
     pub ts_start: String,
+    /// End timestamp (RFC3339 format or Unix timestamp)
     pub ts_end: String,
+    /// Collector IDs to include in the stream
     pub collectors: Vec<String>,
+    /// Type of BGP data to stream
     pub data_type: DataType,
 }
 
+/// Parses various timestamp formats into a UTC DateTime.
+///
+/// Supports the following formats:
+/// - RFC3339 with timezone: `2023-01-01T12:00:00+00:00`
+/// - RFC3339 with Z: `2023-01-01T12:00:00Z`
+/// - ISO8601: `2023-01-01T12:00:00`
+/// - Date only: `2023-01-01`
+/// - Unix timestamp: `1672531200`
+///
+/// # Arguments
+///
+/// * `timestamp` - A timestamp string in any of the supported formats
+///
+/// # Returns
+///
+/// A `DateTime<Utc>` if parsing succeeds, or a `BrokerError` if it fails
+///
+/// # Example
+///
+/// ```ignore
+/// let dt = parse_timestamp("2023-01-01T12:00:00Z").unwrap();
+/// let dt = parse_timestamp("1672531200").unwrap();
+/// let dt = parse_timestamp("2023-01-01").unwrap();
+/// ```
+///
+/// Note: This function is adapted from bgpkit-broker.
 pub fn parse_timestamp(timestamp: &str) -> Result<DateTime<Utc>, BrokerError> {
     // This function is adapted from bgpkit-broker
     // Original source: https://github.com/bgpkit/bgpkit-broker/
@@ -87,6 +121,37 @@ pub fn parse_timestamp(timestamp: &str) -> Result<DateTime<Utc>, BrokerError> {
 }
 
 impl BgpStreamConfig {
+    /// Creates a new stream configuration with validation.
+    ///
+    /// This constructor parses timestamp strings (supporting multiple formats),
+    /// validates that the specified collectors exist, and returns a configuration
+    /// ready for use with `BgpStream`.
+    ///
+    /// # Arguments
+    ///
+    /// * `ts_start` - Start timestamp (RFC3339 or Unix timestamp)
+    /// * `ts_end` - End timestamp (RFC3339 or Unix timestamp)
+    /// * `collectors` - List of collector IDs to include (e.g., "route-views.wide")
+    /// * `data_type` - Type of BGP data: Update, Rib, or Both
+    ///
+    /// # Returns
+    ///
+    /// A configured `BgpStreamConfig` on success, or a `BrokerError` if:
+    /// - Timestamps cannot be parsed
+    /// - All collectors are invalid
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use bgpflux::{BgpStreamConfig, DataType};
+    ///
+    /// let config = BgpStreamConfig::new(
+    ///     "2023-01-01T00:00:00Z",
+    ///     "2023-01-01T01:00:00Z",
+    ///     vec!["route-views.wide", "route-views.sydney"],
+    ///     DataType::Update,
+    /// ).expect("Failed to create config");
+    /// ```
     pub fn new<S: Display>(
         ts_start: S,
         ts_end: S,

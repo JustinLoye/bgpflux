@@ -1,3 +1,50 @@
+//! # bgpflux
+//!
+//! A Rust library and CLI tool for streaming ordered BGP elements from multiple route collectors
+//! with support for both RIB and update data types.
+//!
+//! ## Features
+//!
+//! - **Streaming Architecture**: Efficiently process BGP data without loading everything into memory
+//! - **Multi-Collector Support**: Aggregate BGP updates from multiple route collectors
+//! - **Sorted Output**: All BGP elements are automatically merged in chronological order across collectors
+//! - **Caching**: Optional local file caching to avoid re-downloading data
+//! - **Flexible Data Types**: Support for both RIB dumps and Update messages
+//! - **Customizable Filtering**: Filter by collectors, time ranges, and data types
+//! - **High Performance**: Built with Rust for maximum speed and memory efficiency
+//!
+//! ## Quick Start
+//!
+//! ```no_run
+//! use bgpflux::{BgpStream, BgpStreamConfig, DataType};
+//!
+//! let config = BgpStreamConfig::new(
+//!     "2010-09-01T00:00:00Z",
+//!     "2010-09-01T01:00:00Z",
+//!     vec!["route-views.wide", "route-views.sydney"],
+//!     DataType::Update,
+//! )?;
+//!
+//! let stream = BgpStream::new(config).build();
+//!
+//! for elem in stream {
+//!     println!("{}", elem);
+//! }
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//!
+//! ## Core Components
+//!
+//! - **[`BgpStream`]**: Main streaming interface that aggregates data from multiple collectors
+//! - **[`BgpStreamConfig`]**: Configuration for time ranges, collectors, and data types
+//! - **[`BgpStreamElem`]**: Represents a single BGP element with metadata
+//!
+//! ## Acknowledgments
+//!
+//! This project uses code adapted from:
+//! - [bgpkit-broker](https://github.com/bgpkit/bgpkit-broker) for timestamp parsing
+//! - [bgpkit-parser](https://github.com/bgpkit/bgpkit-parser) for BGP data parsing
+
 pub mod config;
 pub mod elem;
 pub mod utils;
@@ -29,13 +76,60 @@ fn intern_collector(s: String) -> &'static str {
     }
 }
 
+/// The main streaming interface for BGP elements from multiple collectors.
+///
+/// # Examples
+///
+/// Basic streaming from multiple collectors:
+///
+/// ```no_run
+/// use bgpflux::{BgpStream, BgpStreamConfig, DataType};
+///
+/// let config = BgpStreamConfig::new(
+///     "2010-09-01T00:00:00Z",
+///     "2010-09-01T01:00:00Z",
+///     vec!["route-views.wide", "route-views.sydney"],
+///     DataType::Update,
+/// ).unwrap();
+///
+/// let stream = BgpStream::new(config).build();
+///
+/// for elem in stream {
+///     println!("{}", elem);
+/// }
+/// ```
+///
+/// With caching:
+///
+/// ```no_run
+/// use bgpflux::{BgpStream, BgpStreamConfig, DataType};
+///
+/// let config = BgpStreamConfig::new(
+///     "2023-01-01T00:00:00Z",
+///     "2023-01-01T01:00:00Z",
+///     vec!["route-views.wide"],
+///     DataType::Update,
+/// ).unwrap();
+///
+/// let stream = BgpStream::new(config)
+///     .cache_dir("./bgp_cache")
+///     .build();
+///
+/// for elem in stream {
+///     println!("{}", elem);
+/// }
+/// ```
 pub struct BgpStream {
+    /// Configuration for time ranges, collectors, and data types
     pub config: BgpStreamConfig,
+    /// Optional custom broker URL
     pub broker_url: Option<String>,
+    /// Optional local cache directory
     pub cache_dir: Option<String>,
 }
 
 impl BgpStream {
+    /// Creates a new stream with the given configuration.
     pub fn new(config: BgpStreamConfig) -> Self {
         BgpStream {
             config,
@@ -44,16 +138,19 @@ impl BgpStream {
         }
     }
 
+    /// Sets a custom broker URL for discovering BGP archives.
     pub fn broker_url<S: Display>(mut self, broker_url: S) -> Self {
         self.broker_url = Some(broker_url.to_string());
         self
     }
 
+    /// Sets a local cache directory for downloaded files.
     pub fn cache_dir<S: Display>(mut self, cache_dir: S) -> Self {
         self.cache_dir = Some(cache_dir.to_string());
         self
     }
 
+    /// Builds the stream and returns an iterator over BGP elements ordered by timestamp.
     pub fn build(self) -> impl Iterator<Item = BgpStreamElem> {
         let data_types = match self.config.data_type {
             DataType::Rib => vec!["rib"],

@@ -2,17 +2,19 @@ use bgpkit_parser::models::MetaCommunity;
 use bgpkit_parser::{BgpElem, models::ElemType};
 use std::fmt::{Display, Formatter};
 
-// This struct is adapted from bgpkit-parser
-// Original source: https://github.com/bgpkit/bgpkit-parser/
-// Copyright (c) 2021 Mingwei Zhang
-// Licensed under the MIT License
+/// The type of a BGP stream element.
+///
+/// BGP data can be categorized into three types:
+/// - **ANNOUNCE**: A BGP update announcing a new route or change
+/// - **WITHDRAW**: A BGP update withdrawing a previously announced route
+/// - **RIB**: A route from a RIB (Routing Information Base) dump
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename = "lowercase"))]
 pub enum BgpStreamElemType {
     ANNOUNCE,
     WITHDRAW,
-    RIB, // This part has changed
+    RIB,
 }
 
 impl From<ElemType> for BgpStreamElemType {
@@ -26,8 +28,11 @@ impl From<ElemType> for BgpStreamElemType {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct BgpStreamElem {
+    /// The ID of the collector that provided this BGP element
     pub collector_id: &'static str,   // Zero-cost copy
+    /// The type of this BGP element (ANNOUNCE, WITHDRAW, or RIB)
     pub elem_type: BgpStreamElemType, // Shadows BgpElem.elem_type
+    /// The underlying BGP element with full parsing details
     pub elem: BgpElem,
 }
 
