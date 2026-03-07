@@ -12,6 +12,23 @@ pub use elem::{BgpStreamElem, BgpStreamElemType};
 use itertools::Itertools;
 use utils::timestamp_from_project_url;
 
+use std::collections::HashSet;
+use std::sync::{LazyLock, Mutex};
+
+static INTERNED_COLLECTORS: LazyLock<Mutex<HashSet<&'static str>>> =
+    LazyLock::new(|| Mutex::new(HashSet::new()));
+
+fn intern_collector(s: String) -> &'static str {
+    let mut cache = INTERNED_COLLECTORS.lock().unwrap();
+    if let Some(&existing) = cache.get(s.as_str()) {
+        existing
+    } else {
+        let leaked: &'static str = Box::leak(s.into_boxed_str());
+        cache.insert(leaked);
+        leaked
+    }
+}
+
 pub struct BgpStream {
     pub config: BgpStreamConfig,
     pub broker_url: Option<String>,
@@ -77,7 +94,8 @@ impl BgpStream {
 
         let mut streams = Vec::new();
         for ((collector, is_rib), urls) in grouped_urls.into_iter() {
-            let static_collector: &'static str = Box::leak(collector.into_boxed_str());
+            // let static_collector: &'static str = Box::leak(collector.into_boxed_str());
+            let static_collector = intern_collector(collector);
 
             let cache_dir = cache_dir.clone();
 
