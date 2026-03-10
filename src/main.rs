@@ -9,24 +9,41 @@ use clap::{Parser, ValueEnum};
 #[command(author, version, about = "A CLI to stream ordered BGP elements from multiple collectors", long_about = None)]
 struct Args {
     /// Start timestamp (e.g., "2022-01-01T00:00:00Z" or Unix timestamp)
-    #[arg(short, long)]
+    #[arg(short, long, help_heading = "Required arguments")]
     start: String,
 
-    /// End timestamp (e.g., "2022-01-01T01:00:00Z")
-    #[arg(short, long)]
+    /// End timestamp (e.g., "2022-01-01T01:00:00Z" or Unix timestamp)
+    #[arg(short, long, help_heading = "Required arguments")]
     end: String,
 
-    /// Data type: 'update' or 'rib'
-    #[arg(short = 't', long, value_enum, value_delimiter = ',')]
+    /// Data type: "update", "rib" or "update,rib"
+    #[arg(
+        short = 't',
+        long,
+        value_delimiter = ',',
+        required = true,
+        hide_possible_values = true,
+        help_heading = "Required arguments"
+    )]
     data_type: Vec<DataTypeArg>,
 
-    /// Collectors to filter by (can be used multiple times)
-    #[arg(short, long, value_delimiter = ',')]
-    collectors: Vec<String>,
+    /// Collectors (e.g., "-c rrc00 -c rrc01" or "-c rrc00,rrc01")
+    #[arg(
+        short,
+        long,
+        value_delimiter = ',',
+        required = true,
+        help_heading = "Required arguments"
+    )]
+    collector: Vec<String>,
+
+    /// Cache directory
+    #[arg(long, help_heading = "Optional configuration")]
+    cache_dir: Option<String>,
 
     /// Custom broker URL
-    #[arg(short, long, default_value = "https://api.bgpkit.com/v3/broker")]
-    broker_url: String,
+    #[arg(long, help_heading = "Optional configuration")]
+    broker_url: Option<String>,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
@@ -60,7 +77,7 @@ fn main() {
     let data_type = DataTypeArg::to_data_type(&args.data_type)
         .expect("Provide `update`, `rib` or both of them");
 
-    let config = match BgpStreamConfig::new(args.start, args.end, args.collectors, data_type) {
+    let config = match BgpStreamConfig::new(args.start, args.end, args.collector, data_type) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("Error configuring stream: {}", e);
@@ -68,12 +85,19 @@ fn main() {
         }
     };
 
-    let stream = BgpStream::new(config).broker_url(args.broker_url).build();
+    let mut stream = BgpStream::new(config);
+
+    if let Some(cache_dir) = args.cache_dir {
+        stream = stream.cache_dir(cache_dir);
+    }
+    if let Some(broker_url) = args.broker_url {
+        stream = stream.broker_url(broker_url);
+    }
 
     let stdout = io::stdout();
     let mut out = BufWriter::with_capacity(1 << 20, stdout.lock());
 
-    for elem in stream {
+    for elem in stream.build() {
         writeln!(out, "{}", elem).unwrap();
     }
 }
