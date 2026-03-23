@@ -1,27 +1,22 @@
 # bgpflux
 
-A Rust library and CLI tool for streaming ordered BGP elements from multiple route collectors with support for both RIB and update data types.
+A Rust library and CLI tool for historical BGP data analysis.  
+Similar to [bgpreader](https://bgpstream.caida.org/docs/tools/bgpreader), it streams BGP elements in chronological order from:
+- Multiple RIPE RIS and RouteViews route collectors
+- Arbitrary time ranges
+- Both RIBs and updates
 
 ## Features
 
-- **Streaming Architecture**: Efficiently process BGP data without loading everything into memory
-- **Multi-Collector Support**: Aggregate BGP updates from multiple route collectors
-- **Sorted Output**: All BGP elements are automatically merged in chronological order across collectors
-- **Caching**: Optional local file caching to avoid re-downloading data
-- **Flexible Data Types**: Support for both RIB dumps and Update messages
-- **Customizable Filtering**: Filter by collectors, time ranges, and data types
-- **High Performance**: Built with Rust for maximum speed and memory efficiency
+- **[High Performance](performance.md)**: Built with Rust for maximum speed
+- **Robust Ecosystem**: Uses [BGPKIT](https://bgpkit.com/) parser and broker
+- **Streaming**: Efficiently process BGP data on the fly without loading everything into memory
+- **Caching**: Optional local file caching to avoid re-downloading archive data
+
 
 ## Installation
 
-Add this to your `Cargo.toml`:
-
-```toml
-[dependencies]
-bgpflux = "0.1"
-```
-
-Or install the CLI tool:
+Add `bgpflux` to your `Cargo.toml` or install the CLI tool:
 
 ```bash
 cargo install bgpflux
@@ -37,7 +32,7 @@ Stream updates from specific collectors
 bgpflux \
   --start "2010-09-01T00:00:00Z" \
   --end "2010-09-01T01:00:00Z" \
-  --collectors route-views.wide,route-views.sydney \
+  --collectors route-views.wide,rrc04 \
   --data-type update
 ```
 
@@ -45,9 +40,9 @@ Stream RIB dumps
 
 ```bash
 bgpflux \
-  --start "2023-01-01T00:00:00Z" \
-  --end "2023-01-01T01:00:00Z" \
-  --collectors route-views.wide \
+  --start "2010-09-01T00:00:00Z" \
+  --end "2010-09-01T01:00:00Z" \
+  --collectors route-views.wide,rrc04 \
   --data-type rib
 ```
 
@@ -55,10 +50,21 @@ Stream both RIB and updates
 
 ```bash
 bgpflux \
-  --start "2023-01-01T00:00:00Z" \
-  --end "2023-01-01T01:00:00Z" \
-  --collectors route-views.wide \
+  --start "2010-09-01T00:00:00Z" \
+  --end "2010-09-01T01:00:00Z" \
+  --collectors route-views.wide,rrc04 \
   --data-type rib,update
+```
+
+Cache archive files
+
+```bash
+bgpflux \
+  --start "2010-09-01T00:00:00Z" \
+  --end "2010-09-01T01:00:00Z" \
+  --collectors route-views.wide,rrc04 \
+  --data-type update \
+  --cache-dir cache
 ```
 
 ### As a Library

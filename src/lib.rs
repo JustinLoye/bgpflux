@@ -47,32 +47,39 @@
 
 pub mod config;
 pub mod elem;
-pub mod utils;
-
-use std::{collections::HashMap, fmt::Display};
+mod parser_utils;
+mod runtime;
+mod utils;
 
 use bgpkit_broker::BgpkitBroker;
-use bgpkit_parser::BgpkitParser;
 use chrono::DateTime;
 pub use config::{BgpStreamConfig, DataType};
 pub use elem::{BgpStreamElem, BgpStreamElemType};
+use itertools::Either;
 use itertools::Itertools;
-use utils::timestamp_from_project_url;
+use parser_utils::{init_parser_retry, process_parser_to_elems};
+use runtime::{download_semaphore, global_runtime, intern_collector};
+use std::sync::Arc;
+use std::{collections::HashMap, fmt::Display};
 
-use std::collections::HashSet;
-use std::sync::{LazyLock, Mutex};
+/// Makes compiler happy when branching in `build`
+enum BgpStreamIter<I1, I2> {
+    WithCache(I1),
+    NoCache(I2),
+}
+impl<I1, I2> Iterator for BgpStreamIter<I1, I2>
+where
+    I1: Iterator<Item = BgpStreamElem>,
+    I2: Iterator<Item = BgpStreamElem>,
+{
+    type Item = BgpStreamElem;
 
-static INTERNED_COLLECTORS: LazyLock<Mutex<HashSet<&'static str>>> =
-    LazyLock::new(|| Mutex::new(HashSet::new()));
-
-fn intern_collector(s: String) -> &'static str {
-    let mut cache = INTERNED_COLLECTORS.lock().unwrap();
-    if let Some(&existing) = cache.get(s.as_str()) {
-        existing
-    } else {
-        let leaked: &'static str = Box::leak(s.into_boxed_str());
-        cache.insert(leaked);
-        leaked
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::WithCache(i) => i.next(),
+            Self::NoCache(i) => i.next(),
+        }
     }
 }
 
@@ -152,13 +159,20 @@ impl BgpStream {
 
     /// Builds the stream and returns an iterator over BGP elements ordered by timestamp.
     pub fn build(self) -> impl Iterator<Item = BgpStreamElem> {
+        match self.cache_dir {
+            Some(_) => BgpStreamIter::WithCache(self.build_with_cache()),
+            None => BgpStreamIter::NoCache(self.build_no_cache()),
+        }
+    }
+
+    /// Query the broker to return time-ordered archives for each (collectors, data type)
+    fn query_broker(&self) -> HashMap<(String, bool), Vec<String>> {
         let data_types = match self.config.data_type {
             DataType::Rib => vec!["rib"],
             DataType::Update => vec!["update"],
             DataType::Both => vec!["rib", "update"],
         };
 
-        // Collect sorted urls for each (collector, data_type) pair
         let mut grouped_urls = HashMap::new();
         for data_type in data_types {
             let broker = BgpkitBroker::new()
@@ -179,9 +193,55 @@ impl BgpStream {
                     .push(item.url.clone())
             }
         }
+        grouped_urls
+    }
+
+    fn build_no_cache(self) -> impl Iterator<Item = BgpStreamElem> {
+        // Collect sorted urls for each (collector, data_type) pair
+        let grouped_urls = self.query_broker();
 
         // Chain archive files for each (collector, data_type) pair
-        let cache_dir = self.cache_dir.clone();
+        let start = DateTime::parse_from_rfc3339(&self.config.ts_start)
+            .unwrap()
+            .timestamp() as f64;
+        let end = DateTime::parse_from_rfc3339(&self.config.ts_end)
+            .unwrap()
+            .timestamp() as f64;
+        let mut streams = Vec::new();
+        for ((collector, is_rib), urls) in grouped_urls.into_iter() {
+            let static_collector = intern_collector(collector);
+
+            let stream = urls.into_iter().flat_map(move |url| {
+                match init_parser_retry(&url, None) {
+                    Ok(parser) => Either::Left(process_parser_to_elems(
+                        parser,
+                        url,
+                        is_rib,
+                        static_collector,
+                        start,
+                        end,
+                    )),
+                    Err(e) => {
+                        eprintln!("FAILED to initialize parser: {:?}", e);
+                        // "Empty" iterator fallback
+                        Either::Right(std::iter::empty())
+                    }
+                }
+            });
+            streams.push(stream);
+        }
+
+        // Merge them in a single sorted stream
+        streams
+            .into_iter()
+            .kmerge_by(|a, b| a.timestamp <= b.timestamp)
+    }
+
+    fn build_with_cache(self) -> impl Iterator<Item = BgpStreamElem> {
+        // Collect sorted urls for each (collector, data_type) pair
+        let grouped_urls = self.query_broker();
+
+        let cache_dir = Arc::new(self.cache_dir.clone());
         let start = DateTime::parse_from_rfc3339(&self.config.ts_start)
             .unwrap()
             .timestamp() as f64;
@@ -189,43 +249,61 @@ impl BgpStream {
             .unwrap()
             .timestamp() as f64;
 
+        let rt = global_runtime();
+        let sem = download_semaphore();
+        let mut receivers = Vec::new();
+
+        // Spawn Prefetch Tasks
+        for (key, urls) in grouped_urls {
+            // Channel restrict the number of prefetch per (collector, data type). For now hardcoded to 1.
+            let (tx, rx) = tokio::sync::mpsc::channel(1);
+            receivers.push((key, rx));
+
+            let cache = Arc::clone(&cache_dir);
+
+            rt.spawn(async move {
+                for url in urls {
+                    // Acquire a permit from the global pool before starting download
+                    let permit = sem.acquire().await.unwrap();
+
+                    let cache_inner = Arc::clone(&cache);
+                    let url_inner = url.clone();
+
+                    let parser_res = tokio::task::spawn_blocking(move || {
+                        init_parser_retry(&url_inner, cache_inner.as_ref().as_deref())
+                    })
+                    .await
+                    .unwrap();
+
+                    // Release the semaphore permit immediately after the file is ready/cached
+                    // so other streams can start their downloads.
+                    drop(permit);
+
+                    match parser_res {
+                        Ok(parser) => {
+                            if tx.send((url, parser)).await.is_err() {
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("FAILED to initialize parser: {:?}", e);
+                        }
+                    }
+                }
+            });
+        }
+
+        // Build stream iterators consuming the prefetched BgpkitParser objects
         let mut streams = Vec::new();
-        for ((collector, is_rib), urls) in grouped_urls.into_iter() {
-            // let static_collector: &'static str = Box::leak(collector.into_boxed_str());
+        for ((collector, is_rib), mut rx) in receivers {
             let static_collector = intern_collector(collector);
 
-            let cache_dir = cache_dir.clone();
-
-            let stream = urls.into_iter().flat_map(move |url| {
-                let rib_timestamp: Option<f64> = if is_rib {
-                    Some(timestamp_from_project_url(&url).unwrap() as f64)
-                } else {
-                    None
-                };
-
-                let parser = match &cache_dir {
-                    Some(path) => BgpkitParser::new_cached(&url, path),
-                    None => BgpkitParser::new(&url),
-                };
-                parser
-                    .unwrap()
-                    .into_iter()
-                    .take_while(move |elem| elem.timestamp <= end)
-                    .map(move |mut elem| {
-                        let stream_type = if is_rib {
-                            elem.timestamp =
-                                rib_timestamp.expect("expected rib timestamp for rib file");
-                            BgpStreamElemType::RIB
-                        } else {
-                            elem.elem_type.into()
-                        };
-                        BgpStreamElem {
-                            collector_id: static_collector,
-                            elem_type: stream_type,
-                            elem,
-                        }
-                    })
-                    .skip_while(move |elem| elem.timestamp < start - 0.1)
+            let stream = std::iter::from_fn(move || {
+                // Use the global runtime's blocking_recv
+                rx.blocking_recv()
+            })
+            .flat_map(move |(url, parser)| {
+                process_parser_to_elems(parser, url, is_rib, static_collector, start, end)
             });
             streams.push(stream);
         }
@@ -240,8 +318,51 @@ impl BgpStream {
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
+    use std::fs;
 
     use super::*;
+
+    /// Consume the stream to check if it's consistent with `config` and the number of expected BGP elements
+    fn check_stream(
+        stream: impl Iterator<Item = BgpStreamElem>,
+        config: BgpStreamConfig,
+        target_collectors_count: HashMap<(&str, DataType), u32>,
+    ) {
+        let target_elem_types = match config.data_type {
+            DataType::Rib => HashSet::from([BgpStreamElemType::RIB]),
+            DataType::Update => {
+                HashSet::from([BgpStreamElemType::ANNOUNCE, BgpStreamElemType::WITHDRAW])
+            }
+            DataType::Both => HashSet::from([
+                BgpStreamElemType::ANNOUNCE,
+                BgpStreamElemType::WITHDRAW,
+                BgpStreamElemType::RIB,
+            ]),
+        };
+
+        // Collect stream info
+        let mut seen_collectors_count = HashMap::new();
+        let mut seen_elem_types = HashSet::new();
+        let mut timestamps = Vec::new();
+        for elem in stream {
+            seen_collectors_count
+                .entry((elem.collector_id, {
+                    match elem.elem_type {
+                        BgpStreamElemType::RIB => DataType::Rib,
+                        _ => DataType::Update,
+                    }
+                }))
+                .and_modify(|val| *val += 1)
+                .or_insert(1);
+            seen_elem_types.insert(elem.elem_type);
+            timestamps.push(elem.timestamp);
+        }
+
+        // Check if config and stream match
+        assert_eq!(seen_collectors_count, target_collectors_count);
+        assert_eq!(seen_elem_types, target_elem_types);
+        assert!(timestamps.is_sorted());
+    }
 
     #[test]
     fn stream_update() {
@@ -253,32 +374,14 @@ mod tests {
         )
         .unwrap();
 
-        let stream = BgpStream::new(config).build();
-        let mut count: u32 = 0;
-        let mut collectors_count = HashMap::new();
-        let mut seen_elem_types = HashSet::new();
-        let mut timestamps = Vec::new();
-        for elem in stream {
-            collectors_count
-                .entry(elem.collector_id)
-                .and_modify(|val| *val += 1)
-                .or_insert(1);
-            seen_elem_types.insert(elem.elem_type);
-            timestamps.push(elem.timestamp);
-            count += 1;
+        let stream = BgpStream::new(config.clone()).build();
 
-            if count < 20 {
-                println!("{}", elem);
-            }
-        }
-        assert_eq!(count, 48287 + 29490);
-        assert_eq!(collectors_count["route-views.sydney"], 48287);
-        assert_eq!(collectors_count["route-views.wide"], 29490);
-        assert_eq!(
-            seen_elem_types,
-            HashSet::from([BgpStreamElemType::ANNOUNCE, BgpStreamElemType::WITHDRAW])
-        );
-        assert!(timestamps.is_sorted());
+        let target_collectors_count = HashMap::from([
+            (("route-views.sydney", DataType::Update), 48287),
+            (("route-views.wide", DataType::Update), 29490),
+        ]);
+
+        check_stream(stream, config, target_collectors_count);
     }
 
     #[test]
@@ -290,34 +393,27 @@ mod tests {
             config::DataType::Update,
         )
         .unwrap();
+        let test_cache_dir = "test_cache";
 
-        let stream = BgpStream::new(config).cache_dir("cache").build();
-        let mut count: u32 = 0;
-        let mut collectors_count = HashMap::new();
-        let mut seen_elem_types = HashSet::new();
-        let mut timestamps = Vec::new();
-        for elem in stream {
-            collectors_count
-                .entry(elem.collector_id)
-                .and_modify(|val| *val += 1)
-                .or_insert(1);
-            seen_elem_types.insert(elem.elem_type);
-            timestamps.push(elem.timestamp);
-            count += 1;
+        // Test cache miss
+        fs::remove_dir_all(test_cache_dir).ok();
+        fs::create_dir(test_cache_dir).unwrap();
+        let stream = BgpStream::new(config.clone())
+            .cache_dir(test_cache_dir)
+            .build();
+        let target_collectors_count = HashMap::from([
+            (("route-views.sydney", DataType::Update), 48287),
+            (("route-views.wide", DataType::Update), 29490),
+        ]);
+        check_stream(stream, config.clone(), target_collectors_count.clone());
 
-            if count < 20 {
-                println!("{}", elem);
-            }
-        }
+        // Test cache hit
+        let stream = BgpStream::new(config.clone())
+            .cache_dir(test_cache_dir)
+            .build();
+        check_stream(stream, config, target_collectors_count);
 
-        assert_eq!(count, 48287 + 29490);
-        assert_eq!(collectors_count["route-views.sydney"], 48287);
-        assert_eq!(collectors_count["route-views.wide"], 29490);
-        assert_eq!(
-            seen_elem_types,
-            HashSet::from([BgpStreamElemType::ANNOUNCE, BgpStreamElemType::WITHDRAW])
-        );
-        assert!(timestamps.is_sorted());
+        fs::remove_dir_all(test_cache_dir).unwrap();
     }
 
     #[test]
@@ -330,30 +426,14 @@ mod tests {
         )
         .unwrap();
 
-        let stream = BgpStream::new(config).build();
-        let mut count: u32 = 0;
-        let mut collectors_count = HashMap::new();
-        let mut seen_elem_types = HashSet::new();
-        let mut timestamps = Vec::new();
-        for elem in stream {
-            collectors_count
-                .entry(elem.collector_id)
-                .and_modify(|val| *val += 1)
-                .or_insert(1);
-            seen_elem_types.insert(elem.elem_type);
-            timestamps.push(elem.timestamp);
-            count += 1;
+        let stream = BgpStream::new(config.clone()).build();
 
-            if count < 20 {
-                println!("{}", elem);
-            }
-        }
-        println!("{:?}", collectors_count);
-        assert_eq!(count, 828937 + 990164);
-        assert_eq!(collectors_count["route-views.sydney"], 828937);
-        assert_eq!(collectors_count["route-views.wide"], 990164);
-        assert_eq!(seen_elem_types, HashSet::from([BgpStreamElemType::RIB]));
-        assert!(timestamps.is_sorted());
+        let target_collectors_count = HashMap::from([
+            (("route-views.sydney", DataType::Rib), 828937),
+            (("route-views.wide", DataType::Rib), 990164),
+        ]);
+
+        check_stream(stream, config, target_collectors_count);
     }
 
     #[test]
@@ -366,43 +446,16 @@ mod tests {
         )
         .unwrap();
 
-        let stream = BgpStream::new(config).build();
-        let mut count: u32 = 0;
-        let mut collectors_count = HashMap::new();
-        let mut seen_elem_types = HashSet::new();
-        let mut timestamps = Vec::new();
-        for elem in stream {
-            collectors_count
-                .entry((elem.collector_id, {
-                    match elem.elem_type {
-                        BgpStreamElemType::RIB => "rib",
-                        _ => "update",
-                    }
-                }))
-                .and_modify(|val| *val += 1)
-                .or_insert(1);
-            seen_elem_types.insert(elem.elem_type);
-            timestamps.push(elem.timestamp);
-            count += 1;
+        let stream = BgpStream::new(config.clone()).build();
 
-            if count < 20 {
-                println!("{}", elem);
-            }
-        }
-        assert_eq!(count, 828937 + 990164 + 48287 + 29490);
-        assert_eq!(collectors_count[&("route-views.sydney", "rib")], 828937);
-        assert_eq!(collectors_count[&("route-views.wide", "rib")], 990164);
-        assert_eq!(collectors_count[&("route-views.sydney", "update")], 48287);
-        assert_eq!(collectors_count[&("route-views.wide", "update")], 29490);
-        assert_eq!(
-            seen_elem_types,
-            HashSet::from([
-                BgpStreamElemType::RIB,
-                BgpStreamElemType::ANNOUNCE,
-                BgpStreamElemType::WITHDRAW
-            ])
-        );
-        assert!(timestamps.is_sorted());
+        let target_collectors_count = HashMap::from([
+            (("route-views.sydney", DataType::Rib), 828937),
+            (("route-views.wide", DataType::Rib), 990164),
+            (("route-views.sydney", DataType::Update), 48287),
+            (("route-views.wide", DataType::Update), 29490),
+        ]);
+
+        check_stream(stream, config, target_collectors_count);
     }
 
     #[test]
@@ -418,7 +471,6 @@ mod tests {
         .unwrap();
 
         let start = std::time::Instant::now();
-        // let count = BgpStream::new(config).build().count();
         let mut count = 0;
         let stream = BgpStream::new(config).build();
         for elem in stream {
@@ -447,9 +499,8 @@ mod tests {
         .unwrap();
 
         let start = std::time::Instant::now();
-        // let count = BgpStream::new(config).build().count();
         let mut count = 0;
-        let stream = BgpStream::new(config).cache_dir("cache").build();
+        let stream = BgpStream::new(config).cache_dir("test_cache").build();
         for elem in stream {
             std::hint::black_box(&elem);
             count += 1;

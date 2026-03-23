@@ -3,7 +3,7 @@ use std::fmt::Display;
 use bgpkit_broker::{load_collectors, BrokerError};
 use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DataType {
     Update,
     Rib,
@@ -14,7 +14,7 @@ pub enum DataType {
 ///
 /// This struct holds the parameters that define which BGP data to stream:
 /// time range, collectors, and data types.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BgpStreamConfig {
     /// Start timestamp (RFC3339 format or Unix timestamp)
     pub ts_start: String,

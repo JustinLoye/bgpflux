@@ -1,5 +1,5 @@
 use bgpkit_parser::models::MetaCommunity;
-use bgpkit_parser::{BgpElem, models::ElemType};
+use bgpkit_parser::{models::ElemType, BgpElem};
 use std::fmt::{Display, Formatter};
 
 /// The type of a BGP stream element.
@@ -29,7 +29,7 @@ impl From<ElemType> for BgpStreamElemType {
 #[derive(Debug, Clone, PartialEq)]
 pub struct BgpStreamElem {
     /// The ID of the collector that provided this BGP element
-    pub collector_id: &'static str,   // Zero-cost copy
+    pub collector_id: &'static str, // Zero-cost copy
     /// The type of this BGP element (ANNOUNCE, WITHDRAW, or RIB)
     pub elem_type: BgpStreamElemType, // Shadows BgpElem.elem_type
     /// The underlying BGP element with full parsing details
