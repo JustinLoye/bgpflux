@@ -1,6 +1,6 @@
 [package]
 name = "bgpflux"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 authors = ["Justin Loye"]
 description = "A Rust library and CLI for streaming ordered BGP elements from multiple collectors"
@@ -13,10 +13,11 @@ readme = "README.md"
 
 [dependencies]
 bgpkit-broker = "0.10.1"
-bgpkit-parser = "0.15.0"
+bgpkit-parser = "0.16"
 chrono = "0.4.43"
 itertools = "0.14.0"
 serde = { version = "1.0", features = ["derive"], optional = true }
 regex = "1.12.3"
 clap = { version = "4.5.60", features = ["derive"] }
-tokio = {version = "1.50.0", features = ["rt-multi-thread"]}
+tokio = { version = "1.50.0", features = ["rt-multi-thread"] }
+ipnet = "2.12.0"

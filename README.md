@@ -1,5 +1,10 @@
 # bgpflux
 
+[![Docs](https://docs.rs/bgpflux/badge.svg)](https://docs.rs/bgpflux)
+[![Crates.io](https://img.shields.io/crates/v/bgpflux.svg)](https://crates.io/crates/bgpflux)
+[![CI](https://github.com/JustinLoye/bgpflux/actions/workflows/rust.yml/badge.svg)](https://github.com/JustinLoye/bgpflux/actions/workflows/rust.yml)
+[![License](https://img.shields.io/github/license/JustinLoye/bgpflux.svg)](https://github.com/JustinLoye/bgpflux/blob/main/LICENSE)
+
 A Rust library and CLI tool for historical BGP data analysis.  
 Similar to [bgpreader](https://bgpstream.caida.org/docs/tools/bgpreader), it streams BGP elements in chronological order from:
 - Multiple RIPE RIS and RouteViews route collectors
@@ -12,7 +17,6 @@ Similar to [bgpreader](https://bgpstream.caida.org/docs/tools/bgpreader), it str
 - **Robust Ecosystem**: Uses [BGPKIT](https://bgpkit.com/) parser and broker
 - **Streaming**: Efficiently process BGP data on the fly without loading everything into memory
 - **Caching**: Optional local file caching to avoid re-downloading archive data
-
 
 ## Installation
 
@@ -102,5 +106,4 @@ This project uses code adapted from:
 
 ## Roadmap
 
-- [ ] filter support
 - [ ] live mode

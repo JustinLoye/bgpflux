@@ -200,6 +200,9 @@ impl BgpStream {
         // Collect sorted urls for each (collector, data_type) pair
         let grouped_urls = self.query_broker();
 
+        // Allow filters to be shared by multiple parsers
+        let shared_filters = Arc::new(self.config.filters);
+
         // Chain archive files for each (collector, data_type) pair
         let start = DateTime::parse_from_rfc3339(&self.config.ts_start)
             .unwrap()
@@ -210,11 +213,15 @@ impl BgpStream {
         let mut streams = Vec::new();
         for ((collector, is_rib), urls) in grouped_urls.into_iter() {
             let static_collector = intern_collector(collector);
+            let filters = Arc::clone(&shared_filters);
 
             let stream = urls.into_iter().flat_map(move |url| {
                 match init_parser_retry(&url, None) {
                     Ok(parser) => Either::Left(process_parser_to_elems(
-                        parser,
+                        match filters.as_ref() {
+                            Some(f) => parser.with_filters(f),
+                            None => parser,
+                        },
                         url,
                         is_rib,
                         static_collector,
@@ -293,17 +300,30 @@ impl BgpStream {
             });
         }
 
+        let shared_filters = Arc::new(self.config.filters.clone());
+
         // Build stream iterators consuming the prefetched BgpkitParser objects
         let mut streams = Vec::new();
         for ((collector, is_rib), mut rx) in receivers {
             let static_collector = intern_collector(collector);
+            let filters = Arc::clone(&shared_filters);
 
             let stream = std::iter::from_fn(move || {
                 // Use the global runtime's blocking_recv
                 rx.blocking_recv()
             })
             .flat_map(move |(url, parser)| {
-                process_parser_to_elems(parser, url, is_rib, static_collector, start, end)
+                process_parser_to_elems(
+                    match filters.as_ref() {
+                        Some(f) => parser.with_filters(f),
+                        None => parser,
+                    },
+                    url,
+                    is_rib,
+                    static_collector,
+                    start,
+                    end,
+                )
             });
             streams.push(stream);
         }

@@ -1,89 +1,34 @@
+pub mod cli;
 pub mod config;
 pub mod elem;
 pub mod utils;
 
-use bgpflux::{BgpStream, BgpStreamConfig, DataType};
-use clap::{Parser, ValueEnum};
-
-#[derive(Parser, Debug)]
-#[command(author, version, about = "A CLI to stream ordered BGP elements from multiple collectors", long_about = None)]
-struct Args {
-    /// Start timestamp (e.g., "2022-01-01T00:00:00Z" or Unix timestamp)
-    #[arg(short, long, help_heading = "Required arguments")]
-    start: String,
-
-    /// End timestamp (e.g., "2022-01-01T01:00:00Z" or Unix timestamp)
-    #[arg(short, long, help_heading = "Required arguments")]
-    end: String,
-
-    /// Data type: "update", "rib" or "update,rib"
-    #[arg(
-        short = 't',
-        long,
-        value_delimiter = ',',
-        required = true,
-        hide_possible_values = true,
-        help_heading = "Required arguments"
-    )]
-    data_type: Vec<DataTypeArg>,
-
-    /// Collectors (e.g., "-c rrc00 -c rrc01" or "-c rrc00,rrc01")
-    #[arg(
-        short,
-        long,
-        value_delimiter = ',',
-        required = true,
-        help_heading = "Required arguments"
-    )]
-    collector: Vec<String>,
-
-    /// Cache directory
-    #[arg(long, help_heading = "Optional configuration")]
-    cache_dir: Option<String>,
-
-    /// Custom broker URL
-    #[arg(long, help_heading = "Optional configuration")]
-    broker_url: Option<String>,
-}
-
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
-enum DataTypeArg {
-    #[value(alias = "updates")]
-    Update,
-    #[value(alias = "ribs")]
-    Rib,
-}
-
-impl DataTypeArg {
-    /// Collapses a collection of CLI args into a single library DataType
-    fn to_data_type(args: &[DataTypeArg]) -> Result<DataType, &'static str> {
-        let has_update = args.contains(&DataTypeArg::Update);
-        let has_rib = args.contains(&DataTypeArg::Rib);
-
-        match (has_update, has_rib) {
-            (true, true) => Ok(DataType::Both),
-            (true, false) => Ok(DataType::Update),
-            (false, true) => Ok(DataType::Rib),
-            _ => Err("Could not parse data type"),
-        }
-    }
-}
-
+use bgpflux::{BgpStream, BgpStreamConfig};
+use clap::Parser;
+use cli::Args;
 use std::io::{self, BufWriter, Write};
 
 fn main() {
     let args = Args::parse();
 
-    let data_type = DataTypeArg::to_data_type(&args.data_type)
-        .expect("Provide `update`, `rib` or both of them");
+    let data_type = cli::DataTypeArg::to_data_type(&args.data_type).unwrap_or_else(|e| {
+        eprintln!("Error configuring stream: {}", e);
+        std::process::exit(1);
+    });
 
-    let config = match BgpStreamConfig::new(args.start, args.end, args.collector, data_type) {
-        Ok(c) => c,
-        Err(e) => {
+    let mut config = BgpStreamConfig::new(args.start, args.end, args.collector, data_type)
+        .unwrap_or_else(|e| {
             eprintln!("Error configuring stream: {}", e);
             std::process::exit(1);
-        }
-    };
+        });
+
+    let filters = args.filters.parse().unwrap_or_else(|e| {
+        eprintln!("Error parsing filters: {}", e);
+        std::process::exit(1);
+    });
+    if !filters.is_empty() {
+        config = config.with_filters(filters);
+    }
 
     let mut stream = BgpStream::new(config);
 

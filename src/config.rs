@@ -1,6 +1,7 @@
 use std::fmt::Display;
 
 use bgpkit_broker::{load_collectors, BrokerError};
+use bgpkit_parser::Filter;
 use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -24,6 +25,7 @@ pub struct BgpStreamConfig {
     pub collectors: Vec<String>,
     /// Type of BGP data to stream
     pub data_type: DataType,
+    pub filters: Option<Vec<Filter>>,
 }
 
 /// Parses various timestamp formats into a UTC DateTime.
@@ -180,8 +182,23 @@ impl BgpStreamConfig {
             ts_end,
             collectors,
             data_type,
+            filters: None,
         };
         Ok(config)
+    }
+
+    /// Sets the filters for the BGP stream.
+    pub fn with_filters(mut self, filters: Vec<Filter>) -> Self {
+        self.filters = Some(filters);
+        self
+    }
+
+    /// Add a single filter to the existing list
+    pub fn add_filter(mut self, filter: Filter) -> Self {
+        let mut filters = self.filters.unwrap_or_default();
+        filters.push(filter);
+        self.filters = Some(filters);
+        self
     }
 }
 
