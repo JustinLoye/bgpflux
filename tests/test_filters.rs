@@ -11,7 +11,7 @@ const BASE_START_TS: f64 = 1283299200.0;
 const BASE_END_TS: f64 = 1283301000.0;
 
 fn create_config_with_filters(filters: Vec<Filter>) -> BgpStreamConfig {
-    let config = BgpStreamConfig::new(BASE_START, BASE_END, COLLECTORS.to_vec(), DataType::Update)
+    let config = BgpStreamConfig::new(BASE_START, BASE_END, COLLECTORS, DataType::Update)
         .expect("Failed to create config");
 
     if !filters.is_empty() {
@@ -24,7 +24,7 @@ fn create_config_with_filters(filters: Vec<Filter>) -> BgpStreamConfig {
 /// Test that RIB data can be successfully downloaded and parsed
 #[test]
 fn test_parser_rib() {
-    let config = BgpStreamConfig::new(BASE_START, BASE_END, COLLECTORS.to_vec(), DataType::Rib)
+    let config = BgpStreamConfig::new(BASE_START, BASE_END, COLLECTORS, DataType::Rib)
         .expect("Failed to create config");
 
     let stream = BgpStream::new(config).build();
@@ -58,7 +58,7 @@ fn test_parser_rib() {
 /// Test that Update data can be successfully downloaded and parsed
 #[test]
 fn test_parser_update() {
-    let config = BgpStreamConfig::new(BASE_START, BASE_END, COLLECTORS.to_vec(), DataType::Update)
+    let config = BgpStreamConfig::new(BASE_START, BASE_END, COLLECTORS, DataType::Update)
         .expect("Failed to create config");
 
     let stream = BgpStream::new(config).build();
@@ -282,7 +282,7 @@ fn test_filter_prefix_exact() {
 fn test_filter_prefix_super() {
     // First, collect all IPv4 prefixes
     let ipv4_filters = vec![Filter::new("ip_version", "4").expect("Failed to create filter")];
-    let config = BgpStreamConfig::new(BASE_START, BASE_END, COLLECTORS.to_vec(), DataType::Update)
+    let config = BgpStreamConfig::new(BASE_START, BASE_END, COLLECTORS, DataType::Update)
         .expect("Failed to create config");
     let config = config.with_filters(ipv4_filters);
 
@@ -354,7 +354,7 @@ fn test_filter_prefix_super() {
 fn test_filter_prefix_sub() {
     // First, collect all IPv4 prefixes
     let ipv4_filters = vec![Filter::new("ip_version", "4").expect("Failed to create filter")];
-    let config = BgpStreamConfig::new(BASE_START, BASE_END, COLLECTORS.to_vec(), DataType::Update)
+    let config = BgpStreamConfig::new(BASE_START, BASE_END, COLLECTORS, DataType::Update)
         .expect("Failed to create config");
     let config = config.with_filters(ipv4_filters);
 
@@ -428,7 +428,7 @@ fn test_filter_aspath() {
     let peer_asn = 2497;
 
     // First, get the count of announcements from this peer without regex
-    let config = BgpStreamConfig::new(BASE_START, BASE_END, COLLECTORS.to_vec(), DataType::Update)
+    let config = BgpStreamConfig::new(BASE_START, BASE_END, COLLECTORS, DataType::Update)
         .expect("Failed to create config");
 
     let stream = BgpStream::new(config).build();

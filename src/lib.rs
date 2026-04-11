@@ -21,7 +21,7 @@
 //! let config = BgpStreamConfig::new(
 //!     "2010-09-01T00:00:00Z",
 //!     "2010-09-01T01:00:00Z",
-//!     vec!["route-views.wide", "route-views.sydney"],
+//!     &["route-views.wide", "route-views.sydney"],
 //!     DataType::Update,
 //! )?;
 //!
@@ -47,6 +47,7 @@
 
 pub mod config;
 pub mod elem;
+pub mod live;
 mod parser_utils;
 mod runtime;
 mod utils;
@@ -95,7 +96,7 @@ where
 /// let config = BgpStreamConfig::new(
 ///     "2010-09-01T00:00:00Z",
 ///     "2010-09-01T01:00:00Z",
-///     vec!["route-views.wide", "route-views.sydney"],
+///     &["route-views.wide", "route-views.sydney"],
 ///     DataType::Update,
 /// ).unwrap();
 ///
@@ -114,7 +115,7 @@ where
 /// let config = BgpStreamConfig::new(
 ///     "2023-01-01T00:00:00Z",
 ///     "2023-01-01T01:00:00Z",
-///     vec!["route-views.wide"],
+///     &["route-views.wide"],
 ///     DataType::Update,
 /// ).unwrap();
 ///
@@ -389,7 +390,7 @@ mod tests {
         let config = BgpStreamConfig::new(
             "2010-09-01T00:00:00Z",
             "2010-09-01T01:55:00Z",
-            vec!["route-views.wide", "route-views.sydney"],
+            &["route-views.wide", "route-views.sydney"],
             config::DataType::Update,
         )
         .unwrap();
@@ -409,7 +410,7 @@ mod tests {
         let config = BgpStreamConfig::new(
             "2010-09-01T00:00:00Z",
             "2010-09-01T01:55:00Z",
-            vec!["route-views.wide", "route-views.sydney"],
+            &["route-views.wide", "route-views.sydney"],
             config::DataType::Update,
         )
         .unwrap();
@@ -441,7 +442,7 @@ mod tests {
         let config = BgpStreamConfig::new(
             "2010-09-01T00:00:00Z",
             "2010-09-01T1:55:00Z",
-            vec!["route-views.wide", "route-views.sydney"],
+            &["route-views.wide", "route-views.sydney"],
             config::DataType::Rib,
         )
         .unwrap();
@@ -461,7 +462,7 @@ mod tests {
         let config = BgpStreamConfig::new(
             "2010-09-01T00:00:00Z",
             "2010-09-01T1:55:00Z",
-            vec!["route-views.wide", "route-views.sydney"],
+            &["route-views.wide", "route-views.sydney"],
             config::DataType::Both,
         )
         .unwrap();
@@ -485,7 +486,7 @@ mod tests {
         let config = BgpStreamConfig::new(
             "2026-02-04T15:59:00Z",
             "2026-02-04T18:59:00Z",
-            vec!["route-views.amsix", "route-views.linx"],
+            &["route-views.amsix", "route-views.linx"],
             config::DataType::Update,
         )
         .unwrap();
@@ -513,7 +514,7 @@ mod tests {
         let config = BgpStreamConfig::new(
             "2026-02-04T15:59:00Z",
             "2026-02-04T18:59:00Z",
-            vec!["route-views.amsix", "route-views.linx"],
+            &["route-views.amsix", "route-views.linx"],
             config::DataType::Update,
         )
         .unwrap();
