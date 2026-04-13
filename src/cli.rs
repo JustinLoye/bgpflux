@@ -52,13 +52,33 @@ use std::net::IpAddr;
 // }
 
 #[derive(Parser, Debug, Clone)]
-#[command(author, version, about = "A CLI to stream BGP elements")]
+#[command(
+    author,
+    version,
+    about = "A CLI to stream ordered BGP elements from multiple collectors and arbitrary time ranges"
+)]
 pub struct Args {
+    // #[command(subcommand)]
+    // pub live: Option<LiveSubcommand>,
+    /// Trigger live mode
+    #[arg(short, long)]
+    pub live: bool,
+
+    /// Collectors (e.g., "-c rrc00,rrc01")
+    #[arg(
+        short,
+        long,
+        value_delimiter = ',',
+        required = true,
+        help_heading = "Required argument"
+    )]
+    pub collector: Vec<String>,
+
     /// Start timestamp. Required unless 'live' is used.
     #[arg(
         short = 'b',
         long,
-        help_heading = "History arguments",
+        help_heading = "Archive mode required arguments",
         required_unless_present = "live"
     )]
     pub start: Option<String>,
@@ -67,7 +87,7 @@ pub struct Args {
     #[arg(
         short = 'e',
         long,
-        help_heading = "Archive mode",
+        help_heading = "Archive mode required arguments",
         required_unless_present = "live"
     )]
     pub end: Option<String>,
@@ -77,30 +97,29 @@ pub struct Args {
         short = 't',
         long,
         value_delimiter = ',',
-        help_heading = "Archive mode",
+        help_heading = "Archive mode required arguments",
         required_unless_present = "live"
     )]
     pub data_type: Option<Vec<DataTypeArg>>,
 
-    /// Cache directory (Archive only)
-    #[arg(long, help_heading = "Archive mode", conflicts_with = "live")]
+    /// Cache directory
+    #[arg(
+        long,
+        help_heading = "Archive mode optional arguments",
+        conflicts_with = "live"
+    )]
     pub cache_dir: Option<String>,
 
-    /// Custom broker URL (Archive only)
-    #[arg(long, help_heading = "Archive mode", conflicts_with = "live")]
+    /// Custom broker URL
+    #[arg(
+        long,
+        help_heading = "Archive mode optional arguments",
+        conflicts_with = "live"
+    )]
     pub broker_url: Option<String>,
-
-    /// Collectors (e.g., "-c rrc00,rrc01")
-    #[arg(short, long, value_delimiter = ',', required = true)]
-    pub collector: Vec<String>,
 
     #[clap(flatten)]
     pub filters: Filters,
-
-    // #[command(subcommand)]
-    // pub live: Option<LiveSubcommand>,
-    #[arg(long)]
-    pub live: bool,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
