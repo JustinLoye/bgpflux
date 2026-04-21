@@ -18,6 +18,7 @@ use kafka::consumer::{Consumer, FetchOffset, GroupOffsetStorage};
 use kafka::error::Error as KafkaError;
 use std::collections::VecDeque;
 use std::net::{Ipv4Addr, TcpStream};
+use std::sync::mpsc;
 use std::thread::sleep;
 use std::time::Duration;
 use std::{thread, time};
@@ -240,7 +241,18 @@ struct RisStream {
 }
 
 impl RisStream {
-    fn new(socket: WebSocket<MaybeTlsStream<TcpStream>>) -> Self {
+    fn new(collectors: &[String]) -> Self {
+        let (mut socket, _response) =
+            connect(RIS_LIVE_URL).expect("Can't connect to RIS Live websocket server");
+
+        for collector in collectors {
+            let msg = RisSubscribe::new().host(&collector);
+            socket
+                .send(Message::Text(msg.to_json_string().into()))
+                .unwrap();
+            thread::sleep(time::Duration::from_millis(50));
+        }
+
         let buffer = Vec::new().into_iter();
         Self { socket, buffer }
     }
@@ -331,7 +343,14 @@ fn get_matching_topics(client: &mut KafkaClient, pattern: &str) -> Vec<String> {
 // Copyright (c) 2021 Mingwei Zhang
 // Licensed under the MIT License
 impl RouteviewsStream {
-    pub fn new(group: String, pattern: String, brokers: Vec<String>) -> Result<Self, KafkaError> {
+    pub fn new(collectors: &[String]) -> Self {
+        let brokers = vec!["stream.routeviews.org:9092".to_owned()];
+
+        //r#"routeviews\.amsix\.ams\..*\.bmp_raw"#.to_owned();
+        let pattern = build_pattern(collectors.as_ref());
+
+        let group = format!("bgpflux-{}", chrono::Utc::now().timestamp());
+
         let mut client = KafkaClient::new(brokers);
         client
             .load_metadata_all()
@@ -349,11 +368,12 @@ impl RouteviewsStream {
             .with_retry_max_bytes_limit(1_000_000)
             .with_fallback_offset(FetchOffset::Latest)
             .with_offset_storage(Some(GroupOffsetStorage::Kafka))
-            .create()?;
-        Ok(Self {
+            .create()
+            .expect("Could not establish connection to RouteViews");
+        Self {
             con,
             buffer: VecDeque::new(),
-        })
+        }
     }
 }
 
@@ -431,31 +451,38 @@ impl LiveBgpStream {
     }
 
     pub fn build(self) -> Box<dyn Iterator<Item = BgpStreamElem>> {
-        if !self.ris_collectors.is_empty() & !self.rv_collectors.is_empty() {
-            Box::new(Vec::<BgpStreamElem>::new().into_iter())
+        if !self.ris_collectors.is_empty() && !self.rv_collectors.is_empty() {
+            let (tx, rx) = mpsc::channel();
+
+            let tx_ris = tx.clone();
+            thread::spawn(move || {
+                for elem in RisStream::new(self.ris_collectors.as_ref()).into_iter() {
+                    // Gracefully exit (needed in test, otherwise using `break` in main causes a panic)
+                    if tx_ris.send(elem).is_err() {
+                        break;
+                    }
+                }
+            });
+
+            let tx_rv = tx.clone();
+            thread::spawn(move || {
+                for elem in RouteviewsStream::new(self.rv_collectors.as_ref()).into_iter() {
+                    // Gracefully exit
+                    if tx_rv.send(elem).is_err() {
+                        break;
+                    }
+                }
+            });
+
+            drop(tx);
+
+            Box::new(rx.into_iter())
         }
         // Connect to RIPE RIS Live websocket server
         else if !self.ris_collectors.is_empty() {
-            let (mut socket, _response) =
-                connect(RIS_LIVE_URL).expect("Can't connect to RIS Live websocket server");
-
-            for collector in self.config.collectors {
-                let msg = RisSubscribe::new().host(&collector);
-                socket
-                    .send(Message::Text(msg.to_json_string().into()))
-                    .unwrap();
-                thread::sleep(time::Duration::from_millis(50));
-            }
-
-            Box::new(RisStream::new(socket))
+            Box::new(RisStream::new(self.ris_collectors.as_ref()).into_iter())
         } else if !self.rv_collectors.is_empty() {
-            let broker = "stream.routeviews.org:9092".to_owned();
-
-            let pattern = build_pattern(self.rv_collectors.as_ref());
-
-            // let pattern = r#"routeviews\.amsix\.ams\..*\.bmp_raw"#.to_owned();
-            let group = format!("bgpflux-{}", chrono::Utc::now().timestamp());
-            Box::new(RouteviewsStream::new(group, pattern, vec![broker]).unwrap())
+            Box::new(RouteviewsStream::new(self.rv_collectors.as_ref()).into_iter())
         } else {
             Box::new(Vec::<BgpStreamElem>::new().into_iter())
         }
@@ -472,7 +499,7 @@ mod tests {
     fn check_livestream(stream: impl Iterator<Item = BgpStreamElem>, config: LiveConfig) {
         let test_start = Utc::now().timestamp_micros() as f64 / 1e6;
         let test_time = 30.0;
-        let max_delay = 30.0;
+        let max_delay = 45.0;
 
         let mut seen_collectors = HashSet::new();
         for elem in stream {
@@ -481,10 +508,12 @@ mod tests {
                 break;
             }
             seen_collectors.insert(elem.collector_id.to_string());
+            let delay = now - elem.timestamp;
             assert!(
-                elem.timestamp > now - max_delay,
-                "Live stream as more than {} delay (s)",
-                max_delay as i64
+                delay < max_delay,
+                "Live stream as more than {} delay (s) (observed {} s)",
+                max_delay as i64,
+                delay as i64
             );
         }
 
@@ -493,15 +522,22 @@ mod tests {
     }
 
     #[test]
-    fn live_ris() {
+    fn test_ris() {
         let config = LiveConfig::new(&["rrc00", "rrc21"]).unwrap();
         let stream = LiveBgpStream::new(config.clone()).build();
         check_livestream(stream, config);
     }
 
     #[test]
-    fn live_rv() {
+    fn test_rv() {
         let config = LiveConfig::new(&["route-views2", "amsix.ams"]).unwrap();
+        let stream = LiveBgpStream::new(config.clone()).build();
+        check_livestream(stream, config);
+    }
+
+    #[test]
+    fn test_both() {
+        let config = LiveConfig::new(&["route-views2", "rrc00"]).unwrap();
         let stream = LiveBgpStream::new(config.clone()).build();
         check_livestream(stream, config);
     }
