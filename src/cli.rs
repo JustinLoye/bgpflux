@@ -60,7 +60,7 @@ use std::net::IpAddr;
 pub struct Args {
     // #[command(subcommand)]
     // pub live: Option<LiveSubcommand>,
-    /// Trigger live mode
+    /// Switch from archive to live mode
     #[arg(short, long)]
     pub live: bool,
 
@@ -117,6 +117,15 @@ pub struct Args {
         conflicts_with = "live"
     )]
     pub broker_url: Option<String>,
+
+    /// Add a delay to help ensure live BGP elements are streamed in order.
+    #[arg(
+        short,
+        long,
+        requires = "live",
+        help_heading = "Live mode optional arguments"
+    )]
+    pub delay: Option<f64>,
 
     #[clap(flatten)]
     pub filters: Filters,

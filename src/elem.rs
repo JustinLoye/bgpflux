@@ -1,5 +1,6 @@
 use bgpkit_parser::models::MetaCommunity;
 use bgpkit_parser::{models::ElemType, BgpElem};
+use std::cmp::Ordering;
 use std::fmt::{Display, Formatter};
 
 /// The type of a BGP stream element.
@@ -8,7 +9,7 @@ use std::fmt::{Display, Formatter};
 /// - **ANNOUNCE**: A BGP update announcing a new route or change
 /// - **WITHDRAW**: A BGP update withdrawing a previously announced route
 /// - **RIB**: A route from a RIB (Routing Information Base) dump
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename = "lowercase"))]
 pub enum BgpStreamElemType {
@@ -26,7 +27,7 @@ impl From<ElemType> for BgpStreamElemType {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BgpStreamElem {
     /// The ID of the collector that provided this BGP element
     pub collector_id: &'static str, // Zero-cost copy
@@ -130,5 +131,24 @@ impl Display for BgpStreamElem {
         f.write_str("|")?;
 
         f.write_str(self.collector_id)
+    }
+}
+
+impl PartialOrd for BgpStreamElem {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for BgpStreamElem {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match self.elem.timestamp.partial_cmp(&other.elem.timestamp) {
+            Some(Ordering::Equal) | None => self
+                .collector_id
+                .cmp(other.collector_id)
+                .then_with(|| self.elem_type.cmp(&other.elem_type))
+                .then_with(|| self.elem.cmp(&other.elem)),
+            Some(ord) => ord,
+        }
     }
 }

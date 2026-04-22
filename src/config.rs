@@ -151,7 +151,7 @@ impl BgpStreamConfig {
     /// let config = BgpStreamConfig::new(
     ///     "2023-01-01T00:00:00Z",
     ///     "2023-01-01T01:00:00Z",
-    ///     vec!["route-views.wide", "route-views.sydney"],
+    ///     &["route-views.wide", "route-views.sydney"],
     ///     DataType::Update,
     /// ).expect("Failed to create config");
     /// ```

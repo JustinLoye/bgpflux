@@ -4,18 +4,18 @@ use crate::BgpStreamElem;
 use bgpkit_broker::BrokerError;
 use bgpkit_parser::bmp::messages::BmpMessageBody;
 use bgpkit_parser::models::{Asn, Community, ElemType, MetaCommunity, NetworkPrefix, Origin};
-use bgpkit_parser::{parse_bmp_msg, parse_openbmp_header, BgpElem};
-use bgpkit_parser::{Elementor, Filter};
-// use bgpkit_parser::parse_ris_live_message;
 use bgpkit_parser::rislive::error::ParserRisliveError;
 use bgpkit_parser::rislive::messages::{
     RisLiveClientMessage, RisLiveMessage, RisMessageEnum, RisSubscribe,
 };
+use bgpkit_parser::{parse_bmp_msg, parse_openbmp_header, BgpElem};
+use bgpkit_parser::{Elementor, Filter};
 use bytes::Bytes;
 use ipnet::IpNet;
 use kafka::client::KafkaClient;
 use kafka::consumer::{Consumer, FetchOffset, GroupOffsetStorage};
-use kafka::error::Error as KafkaError;
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
 use std::collections::VecDeque;
 use std::net::{Ipv4Addr, TcpStream};
 use std::sync::mpsc;
@@ -283,6 +283,7 @@ impl Iterator for RisStream {
 pub struct LiveConfig {
     /// Collector IDs to include in the stream
     pub collectors: Vec<String>,
+    /// Filter options (same as bgpkit-parser)
     pub filters: Option<Vec<Filter>>,
 }
 
@@ -436,6 +437,66 @@ impl Iterator for RouteviewsStream {
     }
 }
 
+pub struct JitterBuffer<I>
+where
+    I: Iterator<Item = BgpStreamElem>,
+{
+    source: I,
+    buffer: BinaryHeap<Reverse<BgpStreamElem>>,
+    delay: Duration,
+}
+
+impl<I> JitterBuffer<I>
+where
+    I: Iterator<Item = BgpStreamElem>,
+{
+    pub fn new(source: I, delay: Duration) -> Self {
+        Self {
+            source,
+            buffer: BinaryHeap::new(),
+            delay,
+        }
+    }
+}
+
+impl<I> Iterator for JitterBuffer<I>
+where
+    I: Iterator<Item = BgpStreamElem>,
+{
+    type Item = BgpStreamElem;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // Phase 1: Pull from the source until oldest item exceeds the delay window
+        while let Some(elem) = self.source.next() {
+            let ts = elem.elem.timestamp;
+            self.buffer.push(Reverse(elem));
+
+            // Check if the oldest item in the heap has aged past the delay
+            if let Some(Reverse(oldest)) = self.buffer.peek() {
+                if ts - oldest.timestamp > self.delay.as_secs_f64() {
+                    return self.buffer.pop().map(|Reverse(p)| p);
+                }
+            }
+        }
+
+        // Phase 2: Source is exhausted, drain the remaining buffer
+        self.buffer.pop().map(|Reverse(p)| p)
+    }
+}
+
+pub trait JitterBufferExt: Iterator {
+    /// Wraps the iterator in a jitter buffer that reorders elements
+    /// using a binary heap based on a delay threshold.
+    fn jitter_buffer(self, delay: Duration) -> JitterBuffer<Self>
+    where
+        Self: Sized + Iterator<Item = BgpStreamElem>,
+    {
+        JitterBuffer::new(self, delay)
+    }
+}
+
+impl<I: Iterator<Item = BgpStreamElem>> JitterBufferExt for I {}
+
 impl LiveBgpStream {
     pub fn new(config: LiveConfig) -> Self {
         let (ris_collectors, rv_collectors): (Vec<String>, Vec<String>) = config
@@ -496,12 +557,16 @@ mod tests {
     use std::collections::HashSet;
 
     /// Consume the live stream to check if the delay is small and if the requested collectors are present
-    fn check_livestream(stream: impl Iterator<Item = BgpStreamElem>, config: LiveConfig) {
+    fn check_livestream(
+        stream: impl Iterator<Item = BgpStreamElem>,
+        config: LiveConfig,
+    ) -> Vec<BgpStreamElem> {
         let test_start = Utc::now().timestamp_micros() as f64 / 1e6;
         let test_time = 30.0;
         let max_delay = 45.0;
 
         let mut seen_collectors = HashSet::new();
+        let mut elems = Vec::new();
         for elem in stream {
             let now = Utc::now().timestamp_micros() as f64 / 1e6;
             if now > test_start + test_time {
@@ -515,10 +580,12 @@ mod tests {
                 max_delay as i64,
                 delay as i64
             );
+            elems.push(elem);
         }
 
         // Check if config and stream match
         assert_eq!(seen_collectors, HashSet::from_iter(config.collectors));
+        elems
     }
 
     #[test]
@@ -540,5 +607,16 @@ mod tests {
         let config = LiveConfig::new(&["route-views2", "rrc00"]).unwrap();
         let stream = LiveBgpStream::new(config.clone()).build();
         check_livestream(stream, config);
+    }
+
+    #[test]
+    fn test_jitter_buffer() {
+        let config = LiveConfig::new(&["route-views2", "rrc00"]).unwrap();
+        let stream = LiveBgpStream::new(config.clone())
+            .build()
+            .jitter_buffer(Duration::from_secs(20));
+
+        let elems = check_livestream(stream, config);
+        assert!(elems.is_sorted());
     }
 }

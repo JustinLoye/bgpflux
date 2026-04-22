@@ -3,10 +3,16 @@ pub mod config;
 pub mod elem;
 pub mod utils;
 
-use bgpflux::{live::LiveBgpStream, live::LiveConfig, BgpStream, BgpStreamConfig};
+use bgpflux::{
+    live::{JitterBufferExt, LiveBgpStream, LiveConfig},
+    BgpStream, BgpStreamConfig,
+};
 use clap::Parser;
 use cli::Args;
-use std::io::{self, BufWriter, Write};
+use std::{
+    io::{self, BufWriter, Write},
+    time::Duration,
+};
 
 fn main() {
     let args = Args::parse();
@@ -26,8 +32,14 @@ fn main() {
         }
         let stream = LiveBgpStream::new(config);
 
-        for elem in stream.build() {
-            println!("{elem}");
+        if let Some(d) = args.delay {
+            for elem in stream.build().jitter_buffer(Duration::from_secs_f64(d)) {
+                println!("{elem}");
+            }
+        } else {
+            for elem in stream.build() {
+                println!("{elem}");
+            }
         }
     } else {
         let data_type = cli::DataTypeArg::to_data_type(
