@@ -34,9 +34,9 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
-//! ## Quick Start — Live
+//! ## Quick Start — Live (requires `live` feature)
 //!
-//! ```no_run
+//! ```ignore
 //! use bgpflux::{LiveBgpStream, LiveConfig, JitterBufferExt};
 //! use std::time::Duration;
 //!
@@ -54,11 +54,13 @@
 //! ## Core Components
 //!
 //! - **[`BgpStream`]**: Streams historical BGP data from archives
-//! - **[`LiveBgpStream`]**: Streams real-time BGP data from RIS Live and RouteViews Live
 //! - **[`BgpStreamConfig`]**: Configuration for archive streams (time range, collectors, data type)
-//! - **[`LiveConfig`]**: Configuration for live streams (collectors)
 //! - **[`BgpStreamElem`]**: A single BGP element with collector metadata
-//! - **[`JitterBufferExt`]**: Extension trait to reorder live stream elements by timestamp
+//!
+//! With the `live` feature enabled:
+//! - **`LiveBgpStream`**: Streams real-time BGP data from RIS Live and RouteViews Live
+//! - **`LiveConfig`**: Configuration for live streams (collectors)
+//! - **`JitterBufferExt`**: Extension trait to reorder live stream elements by timestamp
 //!
 //! ## Acknowledgments
 //!
@@ -68,6 +70,7 @@
 
 pub mod config;
 pub mod elem;
+#[cfg(any(feature = "live-ris", feature = "live-routeviews"))]
 pub mod live;
 mod parser_utils;
 pub mod runtime;
@@ -79,6 +82,7 @@ pub use config::{BgpStreamConfig, DataType};
 pub use elem::{BgpStreamElem, BgpStreamElemType};
 use itertools::Either;
 use itertools::Itertools;
+#[cfg(any(feature = "live-ris", feature = "live-routeviews"))]
 pub use live::{JitterBufferExt, LiveBgpStream, LiveConfig};
 use parser_utils::{init_parser_retry, process_parser_to_elems};
 use runtime::{download_semaphore, global_runtime, intern_collector};

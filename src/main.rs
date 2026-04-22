@@ -1,12 +1,13 @@
 pub mod cli;
 
-use bgpflux::{BgpStream, BgpStreamConfig, JitterBufferExt, LiveBgpStream, LiveConfig};
+use bgpflux::{BgpStream, BgpStreamConfig};
+#[cfg(any(feature = "live-ris", feature = "live-routeviews"))]
+use bgpflux::{JitterBufferExt, LiveBgpStream, LiveConfig};
 use clap::Parser;
 use cli::Args;
-use std::{
-    io::{self, BufWriter, Write},
-    time::Duration,
-};
+use std::io::{self, BufWriter, Write};
+#[cfg(any(feature = "live-ris", feature = "live-routeviews"))]
+use std::time::Duration;
 
 fn main() {
     let args = Args::parse();
@@ -19,21 +20,30 @@ fn main() {
     let collectors: Vec<&str> = args.collector.iter().map(String::as_str).collect();
 
     if args.live {
-        let mut config = LiveConfig::new(&collectors).expect("Invalid collectors");
+        #[cfg(any(feature = "live-ris", feature = "live-routeviews"))]
+        {
+            let mut config = LiveConfig::new(&collectors).expect("Invalid collectors");
 
-        if !filters.is_empty() {
-            config = config.with_filters(filters);
+            if !filters.is_empty() {
+                config = config.with_filters(filters);
+            }
+            let stream = LiveBgpStream::new(config);
+
+            if let Some(d) = args.delay {
+                for elem in stream.build().jitter_buffer(Duration::from_secs_f64(d)) {
+                    println!("{elem}");
+                }
+            } else {
+                for elem in stream.build() {
+                    println!("{elem}");
+                }
+            }
         }
-        let stream = LiveBgpStream::new(config);
-
-        if let Some(d) = args.delay {
-            for elem in stream.build().jitter_buffer(Duration::from_secs_f64(d)) {
-                println!("{elem}");
-            }
-        } else {
-            for elem in stream.build() {
-                println!("{elem}");
-            }
+        #[cfg(not(any(feature = "live-ris", feature = "live-routeviews")))]
+        {
+            eprintln!("Error: live mode requires the 'live' feature.");
+            eprintln!("Rebuild with: cargo install bgpflux --features live");
+            std::process::exit(1);
         }
     } else {
         let data_type = cli::DataTypeArg::to_data_type(

@@ -22,11 +22,29 @@ Similar to [bgpreader](https://bgpstream.caida.org/docs/tools/bgpreader), it str
 
 ## Installation
 
-Add `bgpflux` to your `Cargo.toml` or install the CLI tool:
+### As a CLI tool
 
 ```bash
+# Archive mode only (default — no WebSocket/Kafka dependencies)
 cargo install bgpflux
+
+# With live streaming support (RIS Live + RouteViews Live)
+cargo install bgpflux --features live
 ```
+
+### As a library
+
+```toml
+# Archive-only (default)
+[dependencies]
+bgpflux = "0.2"
+
+# With live streaming
+[dependencies]
+bgpflux = { version = "0.2", features = ["live"] }
+```
+
+You can also enable backends individually with `live-ris` (RIPE RIS Live via WebSocket) or `live-routeviews` (RouteViews Live via Kafka).
 
 ## Quick Start
 
@@ -73,7 +91,7 @@ bgpflux \
   --cache-dir ./bgp_cache
 ```
 
-### CLI — Live Mode
+### CLI — Live Mode (requires `--features live`)
 
 Stream real-time BGP updates from RIS and RouteViews collectors:
 
@@ -156,7 +174,7 @@ See the [`examples/`](examples/) directory for more:
 | [`cached_stream`](examples/cached_stream.rs) | Use local caching to speed up repeated queries |
 | [`filtered_stream`](examples/filtered_stream.rs) | Apply filters (origin ASN, prefix, AS path) |
 | [`rib_snapshot`](examples/rib_snapshot.rs) | Collect unique prefixes from a RIB dump |
-| [`live_stream`](examples/live_stream.rs) | Real-time BGP streaming with a jitter buffer |
+| [`live_stream`](examples/live_stream.rs) | Real-time BGP streaming with a jitter buffer (requires `live` feature) |
 | [`elem_fields`](examples/elem_fields.rs) | Access individual fields of BGP elements |
 
 ## Output Format
@@ -218,7 +236,7 @@ for elem in stream {
 }
 ```
 
-### `LiveBgpStream`
+### `LiveBgpStream` (requires `live` feature)
 
 Real-time streaming from RIS Live (WebSocket) and RouteViews Live (Kafka). Automatically routes collectors to the right backend based on their name (`rrc*` → RIS, `route-views*` → RouteViews).
 

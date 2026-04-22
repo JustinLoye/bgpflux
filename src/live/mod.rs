@@ -2,13 +2,19 @@ use crate::config::validate_collectors;
 use crate::elem::BgpStreamElem;
 use bgpkit_broker::BrokerError;
 use bgpkit_parser::Filter;
-use ris::RisStream;
-use routeviews::RouteviewsStream;
+#[cfg(all(feature = "live-ris", feature = "live-routeviews"))]
 use std::{sync::mpsc, thread};
 
 mod jitter_buffer;
+#[cfg(feature = "live-ris")]
 mod ris;
+#[cfg(feature = "live-routeviews")]
 mod routeviews;
+
+#[cfg(feature = "live-ris")]
+use ris::RisStream;
+#[cfg(feature = "live-routeviews")]
+use routeviews::RouteviewsStream;
 
 pub use jitter_buffer::JitterBufferExt;
 
@@ -65,13 +71,31 @@ impl LiveBgpStream {
     }
 
     pub fn build(self) -> Box<dyn Iterator<Item = BgpStreamElem>> {
-        if !self.ris_collectors.is_empty() && !self.rv_collectors.is_empty() {
+        let ris_collectors = self.ris_collectors;
+        let rv_collectors = self.rv_collectors;
+
+        #[cfg(not(feature = "live-ris"))]
+        if !ris_collectors.is_empty() {
+            eprintln!(
+                "Warning: RIS Live collectors {:?} require the 'live-ris' feature (ignored)",
+                ris_collectors
+            );
+        }
+        #[cfg(not(feature = "live-routeviews"))]
+        if !rv_collectors.is_empty() {
+            eprintln!(
+                "Warning: RouteViews Live collectors {:?} require the 'live-routeviews' feature (ignored)",
+                rv_collectors
+            );
+        }
+
+        #[cfg(all(feature = "live-ris", feature = "live-routeviews"))]
+        if !ris_collectors.is_empty() && !rv_collectors.is_empty() {
             let (tx, rx) = mpsc::channel();
 
             let tx_ris = tx.clone();
             thread::spawn(move || {
-                for elem in RisStream::new(self.ris_collectors.as_ref()).into_iter() {
-                    // Gracefully exit (needed in test, otherwise using `break` in main causes a panic)
+                for elem in RisStream::new(&ris_collectors) {
                     if tx_ris.send(elem).is_err() {
                         break;
                     }
@@ -80,8 +104,7 @@ impl LiveBgpStream {
 
             let tx_rv = tx.clone();
             thread::spawn(move || {
-                for elem in RouteviewsStream::new(self.rv_collectors.as_ref()).into_iter() {
-                    // Gracefully exit
+                for elem in RouteviewsStream::new(&rv_collectors) {
                     if tx_rv.send(elem).is_err() {
                         break;
                     }
@@ -89,17 +112,20 @@ impl LiveBgpStream {
             });
 
             drop(tx);
+            return Box::new(rx.into_iter());
+        }
 
-            Box::new(rx.into_iter())
+        #[cfg(feature = "live-ris")]
+        if !ris_collectors.is_empty() {
+            return Box::new(RisStream::new(&ris_collectors));
         }
-        // Connect to RIPE RIS Live websocket server
-        else if !self.ris_collectors.is_empty() {
-            Box::new(RisStream::new(self.ris_collectors.as_ref()).into_iter())
-        } else if !self.rv_collectors.is_empty() {
-            Box::new(RouteviewsStream::new(self.rv_collectors.as_ref()).into_iter())
-        } else {
-            Box::new(Vec::<BgpStreamElem>::new().into_iter())
+
+        #[cfg(feature = "live-routeviews")]
+        if !rv_collectors.is_empty() {
+            return Box::new(RouteviewsStream::new(&rv_collectors));
         }
+
+        Box::new(std::iter::empty())
     }
 }
 
@@ -142,6 +168,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "live-ris")]
     fn test_ris() {
         let config = LiveConfig::new(&["rrc00", "rrc21"]).unwrap();
         let stream = LiveBgpStream::new(config.clone()).build();
@@ -149,6 +176,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "live-routeviews")]
     fn test_rv() {
         let config = LiveConfig::new(&["route-views2", "amsix.ams"]).unwrap();
         let stream = LiveBgpStream::new(config.clone()).build();
@@ -156,6 +184,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(all(feature = "live-ris", feature = "live-routeviews"))]
     fn test_both() {
         let config = LiveConfig::new(&["route-views2", "rrc00"]).unwrap();
         let stream = LiveBgpStream::new(config.clone()).build();
@@ -163,6 +192,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(all(feature = "live-ris", feature = "live-routeviews"))]
     fn test_jitter_buffer() {
         let config = LiveConfig::new(&["route-views2", "rrc00"]).unwrap();
         let stream = LiveBgpStream::new(config.clone())
