@@ -25,6 +25,7 @@ pub struct BgpStreamConfig {
     pub collectors: Vec<String>,
     /// Type of BGP data to stream
     pub data_type: DataType,
+    /// Filter options (same as bgpkit-parser)
     pub filters: Option<Vec<Filter>>,
 }
 
@@ -150,14 +151,14 @@ impl BgpStreamConfig {
     /// let config = BgpStreamConfig::new(
     ///     "2023-01-01T00:00:00Z",
     ///     "2023-01-01T01:00:00Z",
-    ///     vec!["route-views.wide", "route-views.sydney"],
+    ///     &["route-views.wide", "route-views.sydney"],
     ///     DataType::Update,
     /// ).expect("Failed to create config");
     /// ```
     pub fn new<S: Display>(
         ts_start: S,
         ts_end: S,
-        collectors: impl IntoIterator<Item = impl Into<String>>,
+        collectors: &[&str],
         data_type: DataType,
     ) -> Result<BgpStreamConfig, BrokerError> {
         let ts_start = parse_timestamp(&ts_start.to_string())?;
@@ -166,16 +167,7 @@ impl BgpStreamConfig {
         let ts_start = ts_start.format("%Y-%m-%dT%H:%M:%SZ").to_string();
         let ts_end = ts_end.format("%Y-%m-%dT%H:%M:%SZ").to_string();
 
-        let collectors: Vec<String> = collectors.into_iter().map(|c| c.into()).collect();
-
-        let available_collectors: Vec<String> =
-            load_collectors()?.into_iter().map(|c| c.id).collect();
-        let (collectors, invalid_collectors): (Vec<String>, Vec<String>) = collectors
-            .into_iter()
-            .partition(|c| available_collectors.contains(c));
-        for c in invalid_collectors {
-            eprintln!("Dropped collector {} (not valid)", c);
-        }
+        let collectors = validate_collectors(collectors)?;
 
         let config = BgpStreamConfig {
             ts_start,
@@ -202,6 +194,20 @@ impl BgpStreamConfig {
     }
 }
 
+/// Filter out non-existant collectors
+pub fn validate_collectors(collectors: &[&str]) -> Result<Vec<String>, BrokerError> {
+    let collectors: Vec<String> = collectors.iter().map(|e| e.to_string()).collect();
+
+    let available_collectors: Vec<String> = load_collectors()?.into_iter().map(|c| c.id).collect();
+    let (collectors, invalid_collectors): (Vec<String>, Vec<String>) = collectors
+        .into_iter()
+        .partition(|c| available_collectors.contains(c));
+    for c in invalid_collectors {
+        eprintln!("Dropped collector {} (not valid)", c);
+    }
+    Ok(collectors)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -211,7 +217,7 @@ mod tests {
         let config = BgpStreamConfig::new(
             "1283299200",
             "1283306400",
-            vec!["route-views.wide", "route-views.sydney", "cute cat"],
+            &["route-views.wide", "route-views.sydney", "cute cat"],
             DataType::Rib,
         )?;
         assert_eq!(

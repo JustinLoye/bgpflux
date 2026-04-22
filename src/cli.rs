@@ -7,45 +7,125 @@ use ipnet::IpNet;
 use itertools::Itertools;
 use std::net::IpAddr;
 
+// #[derive(Parser, Debug, Clone)]
+// #[command(author, version, about = "A CLI to stream ordered BGP elements from multiple collectors and arbitrary time ranges", long_about = None)]
+// pub struct Args {
+//     /// Start timestamp (e.g., "2022-01-01T00:00:00Z" or Unix timestamp)
+//     #[arg(short = 'b', long, help_heading = "Required arguments")]
+//     pub start: String,
+
+//     /// End timestamp (e.g., "2022-01-01T01:00:00Z" or Unix timestamp)
+//     #[arg(short = 'e', long, help_heading = "Required arguments")]
+//     pub end: String,
+
+//     /// Data type: "update", "rib" or "update,rib"
+//     #[arg(
+//         short = 't',
+//         long,
+//         value_delimiter = ',',
+//         required = true,
+//         hide_possible_values = true,
+//         help_heading = "Required arguments"
+//     )]
+//     pub data_type: Vec<DataTypeArg>,
+
+//     /// Collectors (e.g., "-c rrc00 -c rrc01" or "-c rrc00,rrc01")
+//     #[arg(
+//         short,
+//         long,
+//         value_delimiter = ',',
+//         required = true,
+//         help_heading = "Required arguments"
+//     )]
+//     pub collector: Vec<String>,
+
+//     /// Cache directory
+//     #[arg(long, help_heading = "Optional configuration")]
+//     pub cache_dir: Option<String>,
+
+//     /// Custom broker URL
+//     #[arg(long, help_heading = "Optional configuration")]
+//     pub broker_url: Option<String>,
+
+//     #[clap(flatten)]
+//     pub filters: Filters,
+// }
+
 #[derive(Parser, Debug, Clone)]
-#[command(author, version, about = "A CLI to stream ordered BGP elements from multiple collectors and arbitrary time ranges", long_about = None)]
+#[command(
+    author,
+    version,
+    about = "A CLI to stream ordered BGP elements from multiple collectors and arbitrary time ranges"
+)]
 pub struct Args {
-    /// Start timestamp (e.g., "2022-01-01T00:00:00Z" or Unix timestamp)
-    #[arg(short = 'b', long, help_heading = "Required arguments")]
-    pub start: String,
+    // #[command(subcommand)]
+    // pub live: Option<LiveSubcommand>,
+    /// Switch from archive to live mode
+    #[arg(short, long)]
+    pub live: bool,
 
-    /// End timestamp (e.g., "2022-01-01T01:00:00Z" or Unix timestamp)
-    #[arg(short = 'e', long, help_heading = "Required arguments")]
-    pub end: String,
-
-    /// Data type: "update", "rib" or "update,rib"
-    #[arg(
-        short = 't',
-        long,
-        value_delimiter = ',',
-        required = true,
-        hide_possible_values = true,
-        help_heading = "Required arguments"
-    )]
-    pub data_type: Vec<DataTypeArg>,
-
-    /// Collectors (e.g., "-c rrc00 -c rrc01" or "-c rrc00,rrc01")
+    /// Collectors (e.g., "-c rrc00,rrc01")
     #[arg(
         short,
         long,
         value_delimiter = ',',
         required = true,
-        help_heading = "Required arguments"
+        help_heading = "Required argument"
     )]
     pub collector: Vec<String>,
 
+    /// Start timestamp. Required unless 'live' is used.
+    #[arg(
+        short = 'b',
+        long,
+        help_heading = "Archive mode required arguments",
+        required_unless_present = "live"
+    )]
+    pub start: Option<String>,
+
+    /// End timestamp. Required unless 'live' is used.
+    #[arg(
+        short = 'e',
+        long,
+        help_heading = "Archive mode required arguments",
+        required_unless_present = "live"
+    )]
+    pub end: Option<String>,
+
+    /// Data type: "update", "rib" or "update,rib". Required unless 'live' is used.
+    #[arg(
+        short = 't',
+        long,
+        value_delimiter = ',',
+        help_heading = "Archive mode required arguments",
+        required_unless_present = "live"
+    )]
+    pub data_type: Option<Vec<DataTypeArg>>,
+
     /// Cache directory
-    #[arg(long, help_heading = "Optional configuration")]
+    #[arg(
+        long,
+        help_heading = "Archive mode optional arguments",
+        conflicts_with = "live"
+    )]
     pub cache_dir: Option<String>,
 
     /// Custom broker URL
-    #[arg(long, help_heading = "Optional configuration")]
+    #[arg(
+        long,
+        help_heading = "Archive mode optional arguments",
+        conflicts_with = "live"
+    )]
     pub broker_url: Option<String>,
+
+    /// Add a delay to help ensure live BGP elements are streamed in order.
+    #[arg(
+        short,
+        long,
+        requires = "live",
+        help_heading = "Live mode optional arguments"
+    )]
+    pub delay: Option<f64>,
 
     #[clap(flatten)]
     pub filters: Filters,
