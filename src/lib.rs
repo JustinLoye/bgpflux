@@ -49,7 +49,7 @@ pub mod config;
 pub mod elem;
 pub mod live;
 mod parser_utils;
-mod runtime;
+pub mod runtime;
 mod utils;
 
 use bgpkit_broker::BgpkitBroker;
@@ -58,6 +58,7 @@ pub use config::{BgpStreamConfig, DataType};
 pub use elem::{BgpStreamElem, BgpStreamElemType};
 use itertools::Either;
 use itertools::Itertools;
+pub use live::{JitterBufferExt, LiveBgpStream, LiveConfig};
 use parser_utils::{init_parser_retry, process_parser_to_elems};
 use runtime::{download_semaphore, global_runtime, intern_collector};
 use std::sync::Arc;
