@@ -1,6 +1,6 @@
 [package]
 name = "bgpflux"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 authors = ["Justin Loye"]
 description = "A Rust library and CLI for streaming ordered BGP elements from multiple collectors"
