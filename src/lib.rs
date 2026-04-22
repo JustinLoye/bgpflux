@@ -1,27 +1,28 @@
 //! # bgpflux
 //!
-//! A Rust library and CLI tool for streaming ordered BGP elements from multiple route collectors
-//! with support for both RIB and update data types.
+//! A Rust library and CLI for streaming ordered BGP elements from multiple route collectors.
+//!
+//! bgpflux merges BGP data from RIPE RIS and RouteViews collectors in chronological order,
+//! supporting both historical archives and real-time feeds.
 //!
 //! ## Features
 //!
-//! - **Streaming Architecture**: Efficiently process BGP data without loading everything into memory
-//! - **Multi-Collector Support**: Aggregate BGP updates from multiple route collectors
-//! - **Sorted Output**: All BGP elements are automatically merged in chronological order across collectors
-//! - **Caching**: Optional local file caching to avoid re-downloading data
-//! - **Flexible Data Types**: Support for both RIB dumps and Update messages
-//! - **Customizable Filtering**: Filter by collectors, time ranges, and data types
-//! - **High Performance**: Built with Rust for maximum speed and memory efficiency
+//! - **Archive & Live streaming**: Historical data via [BGPKIT Broker](https://bgpkit.com/),
+//!   real-time data via RIS Live (WebSocket) and RouteViews Live (Kafka)
+//! - **Sorted output**: Elements from multiple collectors are merged in timestamp order
+//! - **Filtering**: Origin ASN, prefix, peer IP/ASN, AS path regex, community, IP version
+//! - **Caching**: Optional local file caching to skip re-downloading archive data
+//! - **Jitter buffer**: Reorder live stream elements with a configurable delay window
 //!
-//! ## Quick Start
+//! ## Quick Start — Archive
 //!
 //! ```no_run
 //! use bgpflux::{BgpStream, BgpStreamConfig, DataType};
 //!
 //! let config = BgpStreamConfig::new(
-//!     "2010-09-01T00:00:00Z",
-//!     "2010-09-01T01:00:00Z",
-//!     &["route-views.wide", "route-views.sydney"],
+//!     "2025-01-15T12:00:00Z",
+//!     "2025-01-15T13:00:00Z",
+//!     &["route-views.wide", "rrc04"],
 //!     DataType::Update,
 //! )?;
 //!
@@ -33,17 +34,37 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
+//! ## Quick Start — Live
+//!
+//! ```no_run
+//! use bgpflux::{LiveBgpStream, LiveConfig, JitterBufferExt};
+//! use std::time::Duration;
+//!
+//! let config = LiveConfig::new(&["rrc00", "route-views2"])?;
+//! let stream = LiveBgpStream::new(config)
+//!     .build()
+//!     .jitter_buffer(Duration::from_secs(15));
+//!
+//! for elem in stream {
+//!     println!("{}", elem);
+//! }
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//!
 //! ## Core Components
 //!
-//! - **[`BgpStream`]**: Main streaming interface that aggregates data from multiple collectors
-//! - **[`BgpStreamConfig`]**: Configuration for time ranges, collectors, and data types
-//! - **[`BgpStreamElem`]**: Represents a single BGP element with metadata
+//! - **[`BgpStream`]**: Streams historical BGP data from archives
+//! - **[`LiveBgpStream`]**: Streams real-time BGP data from RIS Live and RouteViews Live
+//! - **[`BgpStreamConfig`]**: Configuration for archive streams (time range, collectors, data type)
+//! - **[`LiveConfig`]**: Configuration for live streams (collectors)
+//! - **[`BgpStreamElem`]**: A single BGP element with collector metadata
+//! - **[`JitterBufferExt`]**: Extension trait to reorder live stream elements by timestamp
 //!
 //! ## Acknowledgments
 //!
-//! This project uses code adapted from:
-//! - [bgpkit-broker](https://github.com/bgpkit/bgpkit-broker) for timestamp parsing
-//! - [bgpkit-parser](https://github.com/bgpkit/bgpkit-parser) for BGP data parsing
+//! This project uses code copied or  adapted from:
+//! - [bgpkit-broker](https://github.com/bgpkit/bgpkit-broker)
+//! - [bgpkit-parser](https://github.com/bgpkit/bgpkit-parser)
 
 pub mod config;
 pub mod elem;
