@@ -37,11 +37,11 @@ cargo install bgpflux --features live
 ```toml
 # Archive-only (default)
 [dependencies]
-bgpflux = "0.2"
+bgpflux = "0.3"
 
 # With live streaming
 [dependencies]
-bgpflux = { version = "0.2", features = ["live"] }
+bgpflux = { version = "0.3", features = ["live"] }
 ```
 
 You can also enable backends individually with `live-ris` (RIPE RIS Live via WebSocket) or `live-routeviews` (RouteViews Live via Kafka).
