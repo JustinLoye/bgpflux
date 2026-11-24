@@ -17,9 +17,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         DataType::Update,
     )?;
 
-    let stream = BgpStream::new(config)
-        .cache_dir("./bgp_cache")
-        .build();
+    let stream = BgpStream::new(config).cache_dir("./bgp_cache").build();
 
     let mut count = 0;
     for elem in stream {
