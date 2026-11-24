@@ -1,7 +1,11 @@
+//TODO: re-use the public bgpkit-parser parsing logic instead of copying the private one
+
 use crate::elem::BgpStreamElem;
 use crate::runtime::intern_collector;
 
-use bgpkit_parser::models::{Asn, Community, ElemType, MetaCommunity, NetworkPrefix, Origin};
+use bgpkit_parser::models::{
+    Asn, Community, ElemType, MetaCommunity, NetworkPrefix, NextHopAddress, Origin,
+};
 use bgpkit_parser::rislive::error::ParserRisliveError;
 use bgpkit_parser::rislive::messages::{
     RisLiveClientMessage, RisLiveMessage, RisMessageEnum, RisSubscribe,
@@ -9,7 +13,7 @@ use bgpkit_parser::rislive::messages::{
 use bgpkit_parser::BgpElem;
 use ipnet::IpNet;
 
-use std::net::{Ipv4Addr, TcpStream};
+use std::net::{IpAddr, Ipv4Addr, TcpStream};
 
 use std::{thread, time};
 use tungstenite::stream::MaybeTlsStream;
@@ -29,6 +33,19 @@ macro_rules! unwrap_or_return {
             Err(_) => return Err(ParserRisliveError::IncorrectJson($msg_string)),
         }
     };
+}
+
+// This function is copied from bgpkit-parser
+// Original source: https://github.com/bgpkit/bgpkit-parser/
+// Copyright (c) 2021 Mingwei Zhang
+// Licensed under the MIT License
+/// Parse a RIS Live next-hop string — one address or a comma-joined RFC 2545
+/// pair — into its scope-resolved global address.
+fn parse_next_hop(next_hop: String) -> Result<IpAddr, ParserRisliveError> {
+    match next_hop.parse::<NextHopAddress>() {
+        Ok(addr) => Ok(addr.global_addr()),
+        Err(_) => Err(ParserRisliveError::ElemIncorrectIp(next_hop)),
+    }
 }
 
 // This function is copied from bgpkit-parser
@@ -143,6 +160,7 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpStreamElem>, Parse
                     // parser announcements
                     if let Some(announcements) = announcements {
                         for announcement in announcements {
+                            let next_hop = parse_next_hop(announcement.next_hop)?;
                             for prefix in &announcement.prefixes {
                                 let p = parse_prefix(prefix.as_str())?;
                                 let elem = BgpElem {
@@ -155,7 +173,7 @@ pub fn parse_ris_live_message(msg_str: &str) -> Result<Vec<BgpStreamElem>, Parse
                                         prefix: p,
                                         path_id: None,
                                     },
-                                    next_hop: Some(announcement.next_hop),
+                                    next_hop: Some(next_hop),
                                     as_path: path.clone(),
                                     origin_asns: None,
                                     origin: bgp_origin,

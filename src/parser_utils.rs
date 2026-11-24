@@ -59,6 +59,7 @@ where
     loop {
         let res = match cache_dir {
             Some(path) => BgpkitParser::new_cached(url, path),
+            None if url.starts_with("http") => BgpkitParser::new_resumable_http(url),
             None => BgpkitParser::new(url),
         };
         match res {
