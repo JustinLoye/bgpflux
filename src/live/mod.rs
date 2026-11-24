@@ -177,6 +177,7 @@ mod tests {
 
     #[test]
     #[cfg(feature = "live-routeviews")]
+    #[ignore = "bgpkit-parser does not seem to support RouteViews anymore"]
     fn test_rv() {
         let config = LiveConfig::new(&["route-views2", "amsix.ams"]).unwrap();
         let stream = LiveBgpStream::new(config.clone()).build();
@@ -185,6 +186,7 @@ mod tests {
 
     #[test]
     #[cfg(all(feature = "live-ris", feature = "live-routeviews"))]
+    #[ignore = "bgpkit-parser does not seem to support RouteViews anymore"]
     fn test_both() {
         let config = LiveConfig::new(&["route-views2", "rrc00"]).unwrap();
         let stream = LiveBgpStream::new(config.clone()).build();
@@ -193,6 +195,7 @@ mod tests {
 
     #[test]
     #[cfg(all(feature = "live-ris", feature = "live-routeviews"))]
+    #[ignore = "bgpkit-parser does not seem to support RouteViews anymore"]
     fn test_jitter_buffer() {
         let config = LiveConfig::new(&["route-views2", "rrc00"]).unwrap();
         let stream = LiveBgpStream::new(config.clone())
